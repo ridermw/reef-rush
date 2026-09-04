@@ -7,9 +7,9 @@ fast restarts, readable racing lines, and replayable courses that reward precisi
 
 The first public milestone targets three courses:
 
-1. **Kelpway Sprint** for onboarding and clean-line fundamentals.
-2. **Coral Slalom** for tighter routing, shortcuts, and risk-reward recovery.
-3. **Trench Gauntlet** for the high-pressure final leaderboard challenge.
+1. **Sunlit Shoals** for a bright opening sprint that rewards smooth reef lines.
+2. **Kelpworks** for dense kelp lanes and drifting corners that raise the pace.
+3. **Blacksmoker Run** for a volatile trench descent built for high-pressure finishes.
 
 ## Desktop controls
 
