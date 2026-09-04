@@ -1,0 +1,138 @@
+:root {
+  color: #dbeafe;
+  background:
+    radial-gradient(circle at top, rgba(45, 212, 191, 0.25), transparent 35%),
+    linear-gradient(180deg, #082f49 0%, #0f172a 55%, #020617 100%);
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+a {
+  color: inherit;
+}
+
+.shell {
+  width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: 4rem 1.5rem 5rem;
+}
+
+.hero,
+.panel {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 1.5rem;
+  background: rgba(15, 23, 42, 0.68);
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.hero {
+  padding: 3rem;
+}
+
+.panel {
+  margin-top: 1.5rem;
+  padding: 2rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: #5eead4;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p,
+ul {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(3rem, 8vw, 5rem);
+  line-height: 0.95;
+}
+
+h2 {
+  margin-bottom: 0.75rem;
+  font-size: 1.5rem;
+}
+
+h3 {
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.lede,
+.panel > p,
+.card p,
+.control-list {
+  color: #cbd5e1;
+}
+
+.lede {
+  margin-top: 1rem;
+  max-width: 40rem;
+  font-size: 1.125rem;
+}
+
+.course-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.card {
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgba(8, 47, 73, 0.7);
+  border: 1px solid rgba(94, 234, 212, 0.12);
+}
+
+.control-list {
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 2.5rem 1rem 3rem;
+  }
+
+  .hero,
+  .panel {
+    padding: 1.5rem;
+  }
+}
