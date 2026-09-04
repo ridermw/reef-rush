@@ -67,5 +67,12 @@ npm install
 | ------------------------------------------ |
 | Project foundation — complete.             |
 | Application shell — complete.              |
-| First interactive movement loop — planned. |
+| Input and fixed-step loop — complete.       |
+| Fish movement model — complete.             |
+| Physics and chase camera — implemented.     |
 | First playable course — planned.           |
+
+## Development handoff
+
+The September 4, 2026 cross-device checkpoint is documented in
+[`docs/handoffs/2026-09-04-reef-rush.md`](docs/handoffs/2026-09-04-reef-rush.md).
