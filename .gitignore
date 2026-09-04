@@ -2,8 +2,8 @@ node_modules
 dist
 dist-ssr
 coverage
-playwright-report
-test-results
+playwright-report/
+test-results/
 .tmp-vite-template
 .superpowers/sdd/
 

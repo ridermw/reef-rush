@@ -1,8 +1,8 @@
 node_modules
 dist
 coverage
-playwright-report
-test-results
+playwright-report/
+test-results/
 package-lock.json
 .superpowers
 .tmp-vite-template

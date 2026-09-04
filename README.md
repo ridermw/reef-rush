@@ -54,9 +54,10 @@ npm install
 ## License split
 
 - Source code is licensed under the MIT License in [`LICENSE`](LICENSE).
-- First-party art, audio, UI, narrative, and marketing assets are governed by
+- First-party art, audio, UI, narrative, and marketing assets are licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) as described in
   [`ASSET-LICENSE.md`](ASSET-LICENSE.md).
-- Third-party dependencies remain under their own licenses.
+- Third-party dependencies and any third-party assets remain under their own licenses and notices.
 
 ## Progress
 
