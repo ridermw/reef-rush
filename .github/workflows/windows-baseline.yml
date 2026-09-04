@@ -2,6 +2,13 @@ name: Windows dependency baseline
 
 on:
   workflow_dispatch:
+    inputs:
+      prepare_rapier_compat:
+        description: Prepare compatible Rapier metadata and cache without claiming a baseline
+        type: boolean
+        default: false
+
+run-name: ${{ inputs.prepare_rapier_compat && 'Prepare Rapier compatible runtime' || 'Windows dependency baseline' }}
 
 permissions:
   contents: read
@@ -19,6 +26,12 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
+      - name: Prepare compatible physics dependency metadata
+        if: ${{ inputs.prepare_rapier_compat }}
+        run: |
+          npm uninstall @dimforge/rapier3d --package-lock-only --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm install @dimforge/rapier3d-compat@0.20.0 --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Restore public locked dependencies
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
@@ -31,4 +44,15 @@ jobs:
           if-no-files-found: error
           retention-days: 2
       - name: Run the required baseline
+        if: ${{ !inputs.prepare_rapier_compat }}
         run: npm run validate
+      - name: Export prepared dependency metadata
+        if: ${{ inputs.prepare_rapier_compat }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rapier-compat-manifests
+          path: |
+            package.json
+            package-lock.json
+          if-no-files-found: error
+          retention-days: 2
