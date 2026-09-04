@@ -67,9 +67,9 @@ npm install
 | ------------------------------------------ |
 | Project foundation — complete.             |
 | Application shell — complete.              |
-| Input and fixed-step loop — complete.       |
-| Fish movement model — complete.             |
-| Physics and chase camera — fixes required.  |
+| Input and fixed-step loop — complete.      |
+| Fish movement model — complete.            |
+| Physics and chase camera — fixes required. |
 | First playable course — planned.           |
 
 ## Development handoff
