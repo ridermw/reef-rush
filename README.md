@@ -13,13 +13,15 @@ The first public milestone targets three courses:
 
 ## Desktop controls
 
-| Input               | Action                             |
-| ------------------- | ---------------------------------- |
-| `WASD` / Arrow keys | Steer and pitch through the course |
-| `Space`             | Trigger boost pickups              |
-| `Left Shift`        | Feather speed for tight corners    |
-| `R`                 | Restart the current run            |
-| `Esc`               | Pause                              |
+| Input                   | Action                          |
+| ----------------------- | ------------------------------- |
+| `W` / `S`               | Throttle forward / reverse      |
+| `A` / `D`               | Steer left / right              |
+| `ArrowUp` / `ArrowDown` | Pitch up / down                 |
+| `Space`                 | Trigger boost pickups           |
+| `Left Shift`            | Feather speed for tight corners |
+| `R`                     | Restart the current run         |
+| `Esc`                   | Pause                           |
 
 ## Architecture summary
 

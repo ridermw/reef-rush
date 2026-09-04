@@ -24,6 +24,7 @@ it('reads keyboard axes, one-shot actions, and clears consumed presses', () => {
 
   dispatchKeyboardEvent('keydown', { code: 'KeyD' });
   dispatchKeyboardEvent('keydown', { code: 'KeyW' });
+  dispatchKeyboardEvent('keydown', { code: 'ArrowUp' });
   dispatchKeyboardEvent('keydown', { code: 'Space' });
   dispatchKeyboardEvent('keydown', { code: 'ShiftLeft' });
   dispatchKeyboardEvent('keydown', { code: 'Escape' });
@@ -44,6 +45,64 @@ it('reads keyboard axes, one-shot actions, and clears consumed presses', () => {
     dashPressed: false,
     brakeHeld: true,
     pausePressed: false,
+  });
+
+  controller.destroy();
+});
+
+it('cancels opposing throttle keys', () => {
+  const controller = new InputController();
+
+  dispatchKeyboardEvent('keydown', { code: 'KeyW' });
+  dispatchKeyboardEvent('keydown', { code: 'KeyS' });
+
+  expect(controller.readFrame()).toMatchObject({
+    steerX: 0,
+    steerY: 0,
+    throttle: 0,
+  });
+
+  controller.destroy();
+});
+
+it('cancels opposing pitch keys', () => {
+  const controller = new InputController();
+
+  dispatchKeyboardEvent('keydown', { code: 'ArrowUp' });
+  dispatchKeyboardEvent('keydown', { code: 'ArrowDown' });
+
+  expect(controller.readFrame()).toMatchObject({
+    steerX: 0,
+    steerY: 0,
+    throttle: 0,
+  });
+
+  controller.destroy();
+});
+
+it('does not map W to pitch', () => {
+  const controller = new InputController();
+
+  dispatchKeyboardEvent('keydown', { code: 'KeyW' });
+
+  expect(controller.readFrame()).toMatchObject({
+    steerX: 0,
+    steerY: 0,
+    throttle: 1,
+  });
+
+  controller.destroy();
+});
+
+it('does not map ArrowUp to throttle', () => {
+  const controller = new InputController();
+
+  dispatchKeyboardEvent('keydown', { code: 'ArrowUp' });
+
+  expect(controller.readFrame()).toMatchObject({
+    steerX: 0,
+    steerY: -1,
+    throttle: 0,
   });
 
   controller.destroy();

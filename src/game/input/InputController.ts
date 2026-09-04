@@ -102,7 +102,8 @@ export class InputController {
       ['KeyA', 'ArrowLeft'],
       ['KeyD', 'ArrowRight'],
     );
-    const vertical = this.getAxis(['KeyW', 'ArrowUp'], ['KeyS', 'ArrowDown']);
+    const vertical = this.getAxis(['ArrowUp'], ['ArrowDown']);
+    const throttle = this.getAxis(['KeyS'], ['KeyW']);
     const pointerX = this.pendingPointerX;
     const pointerY = this.pendingPointerY;
 
@@ -111,7 +112,6 @@ export class InputController {
 
     const steerX = clampAxis(horizontal + pointerX);
     const steerY = clampAxis(vertical + pointerY);
-    const throttle = clampAxis(this.getThrottle());
     const dashPressed = this.dashQueued;
     const pausePressed = this.pauseQueued;
 
@@ -159,17 +159,5 @@ export class InputController {
     }
 
     return value;
-  }
-
-  private getThrottle(): number {
-    if (this.keyStates.has('KeyW') || this.keyStates.has('ArrowUp')) {
-      return 1;
-    }
-
-    if (this.keyStates.has('KeyS') || this.keyStates.has('ArrowDown')) {
-      return -1;
-    }
-
-    return 0;
   }
 }
