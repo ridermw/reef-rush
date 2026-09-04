@@ -1,0 +1,34 @@
+name: Windows dependency baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Select the pinned Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+      - name: Restore public locked dependencies
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
+        run: npm ci --no-audit --no-fund
+      - name: Export only the npm content cache
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-cache-windows-x64
+          path: ${{ runner.temp }}\reef-rush-npm-cache\_cacache
+          if-no-files-found: error
+          retention-days: 2
+      - name: Run the required baseline
+        run: npm run validate
