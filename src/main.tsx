@@ -1,10 +1,20 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import './index.css';
-import App from './App.tsx';
+import { App } from './app/App';
+import { createAppStore } from './app/appStore';
+import './styles/tokens.css';
+import './styles/app.css';
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+
+if (rootElement === null) {
+  throw new Error('The #root element is missing from index.html.');
+}
+
+const store = createAppStore();
+
+createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <App store={store} />
   </StrictMode>,
 );

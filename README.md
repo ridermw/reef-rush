@@ -64,5 +64,6 @@ npm install
 | Progress                                   |
 | ------------------------------------------ |
 | Project foundation — complete.             |
+| Application shell — complete.              |
 | First interactive movement loop — planned. |
 | First playable course — planned.           |

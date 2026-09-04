@@ -1,0 +1,64 @@
+:root {
+  --color-ocean: #0b4f6c;
+  --color-reef: #31c5b4;
+  --color-hazard: #fb7185;
+  --color-boost: #38bdf8;
+  --color-ink: #020617;
+  --color-foam: #eff6ff;
+  --color-gold: #facc15;
+  --color-panel: rgba(7, 19, 38, 0.82);
+  --color-panel-strong: rgba(2, 6, 23, 0.92);
+  --color-line: rgba(148, 163, 184, 0.28);
+  --color-copy: rgba(226, 232, 240, 0.92);
+  color: var(--color-foam);
+  background:
+    radial-gradient(circle at top, rgba(49, 197, 180, 0.22), transparent 35%),
+    linear-gradient(180deg, #11496a 0%, #08263b 48%, #020617 100%);
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  color: var(--color-foam);
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
