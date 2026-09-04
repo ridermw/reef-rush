@@ -5,6 +5,10 @@ import type {
   FishTuning,
   MotionEnvironment,
 } from './fishTypes';
+import {
+  isEffectivelySubmerged,
+  resolveWaterTransition,
+} from './waterTransition';
 
 export type {
   FishMotionResult,
@@ -15,7 +19,6 @@ export type {
 
 const MAX_PITCH = Math.PI / 3;
 const MAX_ROLL = Math.PI / 4;
-const SURFACE_EPSILON = 1e-6;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -94,8 +97,7 @@ export function stepFishMotion(
   const steerY = clampUnit(input.steerY);
   const throttle = clampUnit(input.throttle);
   const surfaceY = environment.waterSurfaceY + tuning.surfaceY;
-  const effectiveSubmerged =
-    state.isSubmerged || state.position[1] <= surfaceY + SURFACE_EPSILON;
+  const effectiveSubmerged = isEffectivelySubmerged(state, surfaceY);
   const swimSpeed = clampPositive(
     length(state.velocity[0], state.velocity[1], state.velocity[2]),
   );
@@ -215,28 +217,9 @@ export function stepFishMotion(
   nextPosition[1] = state.position[1] + desiredDelta[1];
   nextPosition[2] = state.position[2] + desiredDelta[2];
 
-  const crossedUpward =
-    effectiveSubmerged &&
-    state.position[1] <= surfaceY + SURFACE_EPSILON &&
-    nextPosition[1] > surfaceY + SURFACE_EPSILON &&
-    worldVelocityY > 0;
-  const crossedDownward =
-    !effectiveSubmerged &&
-    state.position[1] >= surfaceY - SURFACE_EPSILON &&
-    nextPosition[1] < surfaceY - SURFACE_EPSILON &&
-    worldVelocityY < 0;
-
-  let nextIsSubmerged = effectiveSubmerged;
-  if (nextPosition[1] > surfaceY + SURFACE_EPSILON) {
-    nextIsSubmerged = false;
-  } else if (nextPosition[1] < surfaceY - SURFACE_EPSILON) {
-    nextIsSubmerged = true;
-  }
-
-  if (crossedUpward) {
-    events.push('breach');
-  } else if (crossedDownward) {
-    events.push('splashdown');
+  const water = resolveWaterTransition(state, nextPosition, surfaceY);
+  if (water.event) {
+    events.push(water.event);
   }
 
   return {
@@ -247,7 +230,7 @@ export function stepFishMotion(
       pitch: nextPitch,
       roll: nextRoll,
       dashEnergy: nextDashEnergy,
-      isSubmerged: nextIsSubmerged,
+      isSubmerged: water.isSubmerged,
     },
     desiredDelta,
     events,

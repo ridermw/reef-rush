@@ -1,4 +1,4 @@
-import type { Collider } from '@dimforge/rapier3d';
+import type { Collider } from '@dimforge/rapier3d-compat';
 import type { InputFrame } from '../input/InputFrame';
 import {
   PLAYER_GAMEPLAY_QUERY_GROUPS,
@@ -12,20 +12,16 @@ import {
   type FishCollisionResult,
 } from '../physics/moveFish';
 import {
-  getTrackedCollider,
-  listTrackedColliders,
-} from '../physics/trackedColliders';
-import {
   type FishState,
   type FishTuning,
   type MotionEnvironment,
   stepFishMotion,
 } from './stepFishMotion';
+import { resolveWaterTransition } from './waterTransition';
 
 type Vec3 = [number, number, number];
 
 type TriggerCollisionKind = 'hazard' | 'checkpoint' | 'pearl';
-const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 };
 
 const TRIGGER_EVENT_TYPES = {
   hazard: 'hazard-entered',
@@ -116,7 +112,7 @@ export class FishController {
     this.collider = collider;
     this.tuning = tuning;
     this.state = cloneState(initialState);
-    syncFishColliderPosition(this.collider, this.state.position);
+    syncFishColliderPosition(this.runtime, this.collider, this.state.position);
   }
 
   getState(): FishState {
@@ -149,10 +145,19 @@ export class FishController {
       dt,
     );
 
+    const water =
+      Number.isFinite(dt) && dt > 0
+        ? resolveWaterTransition(
+            this.state,
+            collision.position,
+            environment.waterSurfaceY + this.tuning.surfaceY,
+          )
+        : { isSubmerged: this.state.isSubmerged, event: null };
     const nextState: FishState = {
       ...motion.next,
       position: [...collision.position],
-      velocity: motion.next.isSubmerged
+      isSubmerged: water.isSubmerged,
+      velocity: water.isSubmerged
         ? subtract(collision.velocity, environment.current)
         : [...collision.velocity],
     };
@@ -163,8 +168,9 @@ export class FishController {
     }
 
     for (const event of motion.events) {
-      events.push({ type: event });
+      if (event === 'dash') events.push({ type: event });
     }
+    if (water.event) events.push({ type: water.event });
 
     for (const contact of collision.contacts) {
       events.push({
@@ -190,15 +196,17 @@ export class FishController {
   private collectTriggerEvents(): FishControllerEvent[] {
     const events: FishControllerEvent[] = [];
     const nextTriggers = new Set<string>();
-    const trackedCollider = getTrackedCollider(this.collider);
-    const shape = trackedCollider?.shape ?? this.collider.shape;
-
-    for (const candidate of listTrackedColliders(this.runtime.world)) {
-      if (candidate.collider === this.collider) {
+    this.runtime.world.propagateModifiedBodyPositionsToColliders();
+    for (const candidate of this.runtime.world.colliders.getAll()) {
+      if (
+        candidate === this.collider ||
+        !candidate.isEnabled() ||
+        candidate.parent()?.isEnabled() === false
+      ) {
         continue;
       }
 
-      const kind = candidate.kind ?? getGameplayCollisionKind(candidate.groups);
+      const kind = getGameplayCollisionKind(candidate);
       if (kind !== 'hazard' && kind !== 'checkpoint' && kind !== 'pearl') {
         continue;
       }
@@ -206,26 +214,16 @@ export class FishController {
       if (
         !doCollisionGroupsInteract(
           PLAYER_GAMEPLAY_QUERY_GROUPS,
-          candidate.groups,
+          candidate.collisionGroups(),
         )
       ) {
         continue;
       }
 
-      const overlapping = shape.intersectsShape(
-        {
-          x: this.state.position[0],
-          y: this.state.position[1],
-          z: this.state.position[2],
-        },
-        IDENTITY_ROTATION,
-        candidate.shape,
-        {
-          x: candidate.position[0],
-          y: candidate.position[1],
-          z: candidate.position[2],
-        },
-        candidate.rotation,
+      const overlapping = candidate.intersectsShape(
+        this.collider.shape,
+        this.collider.translation(),
+        this.collider.rotation(),
       );
 
       if (!overlapping) {

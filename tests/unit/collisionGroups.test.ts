@@ -1,4 +1,4 @@
-import * as RAPIER from '@dimforge/rapier3d';
+import * as RAPIER from '@dimforge/rapier3d-compat';
 import { describe, expect, it } from 'vitest';
 import {
   COLLISION_GROUPS,

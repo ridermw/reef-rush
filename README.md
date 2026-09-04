@@ -69,7 +69,7 @@ npm install
 | Application shell — complete.              |
 | Input and fixed-step loop — complete.      |
 | Fish movement model — complete.            |
-| Physics and chase camera — fixes required. |
+| Physics and chase camera — review cleared. |
 | First playable course — planned.           |
 
 ## Development handoff

@@ -2,7 +2,7 @@ import type {
   Collider,
   ColliderDesc,
   InteractionGroups,
-} from '@dimforge/rapier3d';
+} from '@dimforge/rapier3d-compat';
 
 const MEMBERSHIP_BITS = {
   player: 1 << 0,

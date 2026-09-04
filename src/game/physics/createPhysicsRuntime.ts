@@ -1,13 +1,6 @@
-import * as RAPIER from '@dimforge/rapier3d';
-import {
-  clearTrackedColliders,
-  initTrackedColliders,
-  registerTrackedCollider,
-} from './trackedColliders';
+import * as RAPIER from '@dimforge/rapier3d-compat';
 
-type RapierModule = typeof import('@dimforge/rapier3d') & {
-  init?: () => Promise<void> | void;
-};
+let initialization: Promise<void> | undefined;
 
 export interface PhysicsRuntime {
   world: RAPIER.World;
@@ -15,27 +8,12 @@ export interface PhysicsRuntime {
   dispose(): void;
 }
 
-async function initRapier(module: RapierModule): Promise<void> {
-  if (module.init) {
-    await module.init();
-  }
-}
-
 export async function createPhysicsRuntime(): Promise<PhysicsRuntime> {
-  await initRapier(RAPIER);
+  await (initialization ??= RAPIER.init());
 
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const eventQueue = new RAPIER.EventQueue(true);
   let disposed = false;
-  initTrackedColliders(world);
-
-  const createCollider = world.createCollider.bind(world);
-  const createTrackedCollider: typeof world.createCollider = (desc, parent) => {
-    const collider = createCollider(desc, parent);
-    registerTrackedCollider(world, collider, desc);
-    return collider;
-  };
-  world.createCollider = createTrackedCollider;
 
   return {
     world,
@@ -46,7 +24,6 @@ export async function createPhysicsRuntime(): Promise<PhysicsRuntime> {
       }
 
       disposed = true;
-      clearTrackedColliders(world);
       eventQueue.free();
       world.free();
     },
