@@ -70,7 +70,7 @@ npm install
 | Input and fixed-step loop — complete. |
 | Fish movement model — complete.       |
 | Physics and chase camera — complete.  |
-| Course framework: review cleared.     |
+| Course framework: complete.           |
 | First playable course — planned.      |
 
 ## Development handoff
