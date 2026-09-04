@@ -233,6 +233,58 @@ it('emits splashdown when an airborne fish re-enters the water', () => {
   expect(result.next.isSubmerged).toBe(true);
 });
 
+it('emits breach once when crossing upward and stays quiet while airborne', () => {
+  const breaching = stepFishMotion(
+    fishState({
+      position: [0, -0.001, 0],
+      velocity: [0, 0.5, 0],
+    }),
+    inputFrame(),
+    defaultTuning,
+    stillWater,
+    0.01,
+  );
+
+  expect(breaching.events).toContain('breach');
+  expect(breaching.next.isSubmerged).toBe(false);
+
+  const airborne = stepFishMotion(
+    breaching.next,
+    inputFrame(),
+    defaultTuning,
+    stillWater,
+    0.01,
+  );
+
+  expect(airborne.events).not.toContain('breach');
+  expect(airborne.next.isSubmerged).toBe(false);
+});
+
+it('carries breach gravity into consecutive airborne velocities', () => {
+  const first = stepFishMotion(
+    fishState({
+      position: [0, 2, 0],
+      velocity: [0, 0, 0],
+      isSubmerged: false,
+    }),
+    inputFrame(),
+    defaultTuning,
+    stillWater,
+    0.1,
+  );
+  const second = stepFishMotion(
+    first.next,
+    inputFrame(),
+    defaultTuning,
+    stillWater,
+    0.1,
+  );
+
+  expect(first.next.velocity[1]).toBeLessThan(0);
+  expect(second.next.velocity[1]).toBeLessThan(first.next.velocity[1]);
+  expect(second.desiredDelta[1]).toBeCloseTo(second.next.velocity[1] * 0.1, 5);
+});
+
 it('returns deterministic output for equal inputs', () => {
   const state = fishState({
     position: [1, -3, 2],

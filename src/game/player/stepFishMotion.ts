@@ -203,7 +203,8 @@ export function stepFishMotion(
     worldVelocityY += environment.current[1];
     worldVelocityZ += environment.current[2];
   } else {
-    worldVelocityY -= tuning.breachGravity * stepSeconds;
+    nextVelocity[1] -= tuning.breachGravity * stepSeconds;
+    worldVelocityY = nextVelocity[1];
   }
 
   desiredDelta[0] = worldVelocityX * stepSeconds;
