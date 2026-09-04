@@ -22,7 +22,7 @@ jobs:
       - name: Restore public locked dependencies
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
-        run: npm ci --no-audit --no-fund
+        run: npm run test:bootstrap && npm ci --no-audit --no-fund
       - name: Export only the npm content cache
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
