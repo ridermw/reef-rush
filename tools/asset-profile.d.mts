@@ -57,9 +57,11 @@ export const ASSET_PATHS: readonly [
   'courses/sunlit-shoals.collision.glb',
   'courses/kelpworks.visual.glb',
   'courses/kelpworks.collision.glb',
+  'courses/blacksmoker-run.visual.glb',
+  'courses/blacksmoker-run.collision.glb',
 ];
 export type CourseSourcePaths = Readonly<
-  Record<'sunlit-shoals' | 'kelpworks', string>
+  Record<'sunlit-shoals' | 'kelpworks' | 'blacksmoker-run', string>
 >;
 export function courseSourcePaths(projectRoot: string): CourseSourcePaths;
 export function colliderContract(solid: StaticSolidSource): StaticSolidExtras;

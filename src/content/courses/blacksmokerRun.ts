@@ -11,7 +11,9 @@ const blacksmokerRun = {
   summary: summary.summary,
   medalTimesMs: { gold: 34_000, silver: 52_000, bronze: 75_000 },
   visuals: {
-    kind: 'generated',
+    kind: 'gltf',
+    visualAsset: 'courses/blacksmoker-run.visual.glb',
+    collisionAsset: 'courses/blacksmoker-run.collision.glb',
     waterColor: '#102b3a',
     seabedColor: '#293c46',
   },

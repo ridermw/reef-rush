@@ -307,6 +307,58 @@ def kelp_course(data, variants, collision):
         instance(f"decor-kelp-grove-{i:02}-variant-{variant}", variants[variant], position)
 
 
+def chimney(height, radius, lean, sides=10):
+    # Closed rim and recessed well give a vent mouth without textures or smoke.
+    rings = [(0, radius), (height * 0.45, radius * 0.78),
+             (height * 0.88, radius * 0.68), (height, radius * 0.85),
+             (height, radius * 0.48), (height - 0.45, radius * 0.43)]
+    vertices = []
+    for y, r in rings:
+        for i in range(sides):
+            angle = math.tau * i / sides
+            vertices.append((math.cos(angle) * r + lean * y / height,
+                             y, math.sin(angle) * r))
+    faces = [tuple(reversed(range(sides)))]
+    for ring in range(len(rings) - 1):
+        a, b = ring * sides, (ring + 1) * sides
+        for i in range(sides):
+            n = (i + 1) % sides
+            faces.append((a + i, a + n, b + n, b + i))
+    faces.append(tuple(range((len(rings) - 1) * sides, len(rings) * sides)))
+    return vertices, faces
+
+
+def vent_meshes(palette, seed):
+    rng = random.Random(seed)
+    variants = []
+    for variant, (name, mat) in enumerate(palette.items()):
+        geometry = ([], [])
+        append_geometry(geometry, ellipsoid(1.6, 0.45, 1.35, 10, 6), (0, 0.4, 0))
+        for tower in range(3):
+            height = 4.8 - tower * 1.1 + variant * 0.25
+            append_geometry(geometry, chimney(height, 0.65 - tower * 0.12,
+                                               (variant - 1) * 0.25),
+                            ((tower - 1) * 0.85, 0.35, (tower % 2) * 0.75))
+        for crystal in range(12):
+            angle = math.tau * crystal / 12
+            x, z = math.cos(angle), math.sin(angle)
+            height = 0.6 + rng.random() * 1.1
+            append_geometry(geometry, branch((x, 0.25, z),
+                                             (x * 1.65, height, z * 1.4),
+                                             0.24, 0.045, 5))
+        variants.append(mesh(name, *geometry, [mat], False))
+    return variants
+
+
+def blacksmoker_course(data, variants, collision):
+    static_solids(data)
+    if collision:
+        return
+    for i, position in enumerate(data["ventClusters"]):
+        variant = i % len(variants)
+        instance(f"decor-vent-cluster-{i:02}-variant-{variant}", variants[variant], position)
+
+
 def export_asset(root, relative, build, animated=False):
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -369,6 +421,14 @@ def main():
     variants = kelp_meshes(kelp_palette, kelp["seed"])
     export_asset(args.output_root, "courses/kelpworks.visual.glb", lambda: kelp_course(kelp, variants, False))
     export_asset(args.output_root, "courses/kelpworks.collision.glb", lambda: kelp_course(kelp, variants, True))
+    # Keep all Blacksmoker datablock creation after the six reviewed outputs.
+    black = json.loads((SOURCE / "blacksmoker-assets.json").read_text(encoding="utf-8"))
+    black_palette = {name: material(name, color) for name, color in black["palette"].items()}
+    vents = vent_meshes(black_palette, black["seed"])
+    export_asset(args.output_root, "courses/blacksmoker-run.visual.glb",
+                 lambda: blacksmoker_course(black, vents, False))
+    export_asset(args.output_root, "courses/blacksmoker-run.collision.glb",
+                 lambda: blacksmoker_course(black, vents, True))
 
 
 if __name__ == "__main__":

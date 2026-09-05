@@ -13,6 +13,7 @@ export { colliderContract };
 const COURSE_PROFILES = Object.freeze({
   'sunlit-shoals': {
     sourceFile: 'sunlit-assets.json',
+    decorationCeiling: -7.5,
     solidIds: [
       'sand-bed',
       'west-ledge',
@@ -23,6 +24,7 @@ const COURSE_PROFILES = Object.freeze({
   },
   kelpworks: {
     sourceFile: 'kelpworks-assets.json',
+    decorationCeiling: -7.5,
     solidIds: [
       'kelp-seabed',
       'kelp-west-bank',
@@ -31,6 +33,21 @@ const COURSE_PROFILES = Object.freeze({
       'kelp-east-roots',
       'kelp-urchin',
       'kelp-channel-rock',
+    ],
+  },
+  'blacksmoker-run': {
+    sourceFile: 'blacksmoker-assets.json',
+    decorationCeiling: -12.5,
+    solidIds: [
+      'smoker-seabed',
+      'smoker-west-wall',
+      'smoker-east-wall',
+      'smoker-west-root',
+      'smoker-east-root',
+      'smoker-west-chimney',
+      'smoker-east-chimney',
+      'smoker-hot-vent',
+      'smoker-cinder-vent',
     ],
   },
 });
@@ -56,6 +73,16 @@ const ASSET_PROFILES = Object.freeze([
     asset: 'courses/kelpworks.collision.glb',
     kind: 'collision',
     courseId: 'kelpworks',
+  },
+  {
+    asset: 'courses/blacksmoker-run.visual.glb',
+    kind: 'visual',
+    courseId: 'blacksmoker-run',
+  },
+  {
+    asset: 'courses/blacksmoker-run.collision.glb',
+    kind: 'collision',
+    courseId: 'blacksmoker-run',
   },
 ]);
 export const ASSET_PATHS = Object.freeze(
@@ -269,10 +296,16 @@ const sourceSchema = z.discriminatedUnion('courseId', [
     courseId: z.literal('kelpworks'),
     kelpGroves: z.array(vector).max(256),
   }),
+  z.strictObject({
+    ...sourceBase,
+    courseId: z.literal('blacksmoker-run'),
+    ventClusters: z.array(vector).max(256),
+  }),
 ]);
 const sourcePathsSchema = z.strictObject({
   'sunlit-shoals': z.string().min(1),
   kelpworks: z.string().min(1),
+  'blacksmoker-run': z.string().min(1),
 });
 
 function validateSourceSolids(solids, courseId) {
@@ -682,7 +715,10 @@ export function validateGlb(input, asset, solids = []) {
         const bounds = mesh.bounds.clone().applyMatrix4(matrix);
         requireThat(
           node.name.startsWith('decor-') &&
-            (bounds.max.x < -9 || bounds.min.x > 9 || bounds.max.y <= -7.5),
+            (bounds.max.x < -9 ||
+              bounds.min.x > 9 ||
+              bounds.max.y <=
+                COURSE_PROFILES[profile.courseId].decorationCeiling),
           'Decoration must stay outside the route/spawn ribbon',
         );
       }

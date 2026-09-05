@@ -59,6 +59,49 @@ The JSON art data and generated GLBs are CC BY 4.0; the generator is MIT.
 Suggested attribution: **"Reef Rush original Kelpworks assets, copyright (c)
 2026 Matthew W. Rider, CC BY 4.0; changes: [describe any changes]."**
 
+## Original Blacksmoker assets (Task 12, Slice 12B)
+
+`assets/source/blacksmoker-assets.json` and the same original Python generator
+author volcanic chimney/mineral clusters from simple original geometry.
+Three shared, merged variants combine faceted tapered chimneys, closed rims
+with recessed vent wells, mineral spurs and low basalt foundations. Thirty
+static side placements use dark basalt (`#27343b`), copper (`#a86542`) and
+sulfur (`#c4ac59`) against the course's deep blue water. Each variant is one
+mesh with one primitive/material; there is no animated smoke or new mechanic.
+
+| Output under `public/assets/`           | Original content                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| `courses/blacksmoker-run.visual.glb`    | Nine authoritative solid bases and thirty shared chimney/mineral clusters |
+| `courses/blacksmoker-run.collision.glb` | Only the nine named primitive proxy meshes; no decorative collisions      |
+
+Blacksmoker reuses the unchanged Sunfin mesh and swim animation. The source
+solids reproduce the authored course's exact geometry and colors; dynamic
+gates, currents, checkpoints and pearls remain runtime owned. No downloaded
+artwork, models, textures, decoders, skins or morph targets are incorporated.
+The JSON art data and generated GLBs are CC BY 4.0; the generator is MIT.
+These construction and measurement claims are not human assessments of
+visual quality or gameplay feel.
+
+Suggested attribution: **"Reef Rush original Blacksmoker assets, copyright (c)
+2026 Matthew W. Rider, CC BY 4.0; changes: [describe any changes]."**
+
+### Measured eight-asset set
+
+Measurements use Blender 4.5.13 LTS and the original-v1 validator. Triangles
+count every placed instance, including shared meshes.
+
+| Output under `public/assets/`           |       Bytes |  Triangles | Mesh nodes | Static solids |
+| --------------------------------------- | ----------: | ---------: | ---------: | ------------: |
+| `fish/sunfin.glb`                       |      45,008 |      1,912 |         10 |             0 |
+| `props/reef-kit.glb`                    |      41,264 |      1,512 |          4 |             0 |
+| `courses/sunlit-shoals.visual.glb`      |      78,696 |     19,824 |         59 |             5 |
+| `courses/sunlit-shoals.collision.glb`   |      28,764 |      1,608 |          5 |             5 |
+| `courses/kelpworks.visual.glb`          |     110,388 |     42,948 |         37 |             7 |
+| `courses/kelpworks.collision.glb`       |      37,512 |      2,148 |          7 |             7 |
+| `courses/blacksmoker-run.visual.glb`    |     144,384 |     21,372 |         39 |             9 |
+| `courses/blacksmoker-run.collision.glb` |      40,784 |      2,172 |          9 |             9 |
+| **Total**                               | **526,800** | **93,496** |    **170** |        **42** |
+
 ### Reproduction
 
 Use the repository's pinned Node version and Blender **4.5 LTS**. The initial
@@ -77,9 +120,13 @@ The executable defaults to `blender`, or the optional `BLENDER` environment
 variable. The output root contains the `fish`, `props` and `courses` directories.
 The runner always passes `--background --factory-startup --python-exit-code 1`
 before `--python`, propagates Blender failures and validates its outputs.
-It generates all six files. The original four exports retain their original
+It generates all eight files. The original four exports retain their original
 Blender call order; Kelpworks materials and mesh datablocks are created only
 after those exports, preserving the reviewed Sunlit/fish/prop bytes.
+Blacksmoker materials and mesh datablocks are created only after all six
+previous outputs. Generate into a separate output directory and compare the
+six existing files byte-for-byte before copying only the new Blacksmoker pair;
+do not overwrite previous artwork or update its reviewed hash baselines.
 No UI, network, decoder or image resource is required. Tool installations and
 absolute machine paths do not belong in the repository.
 Unit tests and normal validation load the repository GLBs and do not require
@@ -99,15 +146,16 @@ same Blender build/platform, not promised across Blender updates or platforms.
 `tools/asset-profile.d.mts` supplies the typed `StaticSolidExtras`,
 `NoncollidingExtras`, `StaticSolidSource` and `AssetReport` contract. It has no
 runtime integration. `validateGlb(bytes, assetPath, liveSolids)` accepts the
-selected course's typed solids, including their colors. An explicit six-path
+selected course's typed solids, including their colors. An explicit eight-path
 allowlist assigns fish, prop, visual or collision roles and course identity;
 unknown paths never receive a fallback profile. `validateAssetSet(assetRoot,
-sourcePaths)` requires an exact map with `sunlit-shoals` and `kelpworks` keys,
+sourcePaths)` requires an exact map with `sunlit-shoals`, `kelpworks` and
+`blacksmoker-run` keys,
 each pointing to its own JSON source. `courseSourcePaths(projectRoot)` resolves
 those portable source filenames; `validateProject` also checks both project
 license files. Sources must declare version 1, seed `9042026`, their matching
 `courseId`, valid art data and the exact required solid identities/counts.
-The focused tests compare both complete source solid arrays and all four
+The focused tests compare all three complete source solid arrays and all six
 course outputs to their respective live definitions, preventing silent source
 drift or accidental cross-course matching.
 The runtime shares the pure `src/game/assets/staticSolidContract.mjs` checks
@@ -168,17 +216,29 @@ The five Sunlit IDs are `sand-bed`, `west-ledge`, `coral-mound-east`,
 `coral-mound-west`, and `urchin-outcrop` (the sole static hazard).
 The seven Kelpworks IDs are `kelp-seabed`, `kelp-west-bank`, `kelp-east-bank`,
 `kelp-west-roots`, `kelp-east-roots`, `kelp-urchin` (the sole static hazard),
-and `kelp-channel-rock`. Each occurs exactly once in its own course's visual
+and `kelp-channel-rock`.
+The nine Blacksmoker IDs are `smoker-seabed`, `smoker-west-wall`,
+`smoker-east-wall`, `smoker-west-root`, `smoker-east-root`,
+`smoker-west-chimney`, `smoker-east-chimney`, `smoker-hot-vent` and
+`smoker-cinder-vent` (the latter two are static hazards).
+Each occurs exactly once in its own course's visual
 and collision outputs. Dynamic gates, currents, checkpoints and pearls are
 intentionally absent from all static exports.
 
 Decorative nodes instead have exactly
 `{ "version": 1, "role": "decoration", "collides": false }`;
 fish parts use the same form with `role: "fish-part"`. Course decoration names
-start with `decor-`. Decoration stays outside the open route/spawn ribbon
-(`-9 <= x <= 9`, above `y = -7.5`); low terraces stay below it. The static guard
-checks the entire transformed mesh bounds, not just the instance origin.
+start with `decor-`. Per-course decoration ceilings preserve the open
+route/spawn ribbon: Sunlit and Kelpworks retain `y = -7.5`; Blacksmoker requires
+`y = -12.5` because its authored route descends to `y = -9`. Every decoration
+must satisfy `max.x < -9 || min.x > 9 || max.y <= courseCeiling`.
+The static guard checks the entire transformed actual mesh bounds, not just
+the instance origin. A central Blacksmoker decoration entirely below `-7.5`
+but above `-12.5` is rejected, even though it would fit the earlier courses'
+shallower exemption. Translation, rotation and scale all affect these bounds.
 Kelp grove origins lie at `13 <= abs(x) <= 19`, with fronds outside the ribbon.
+Blacksmoker vent clusters are placed on the route sides, with all their
+geometry outside the same horizontal ribbon.
 This is a visibility/placement guard, not a gameplay or human art-quality assessment.
 Named fish nodes include `sunfin-body`, `sunfin-eye-left`, `sunfin-eye-right`,
 `fin-tail`, `fin-dorsal`, `fin-anal`, `fin-pectoral-left` and

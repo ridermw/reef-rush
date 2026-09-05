@@ -3,6 +3,7 @@ import { Group } from 'three';
 import { afterEach, expect, it } from 'vitest';
 import sunlit from '../../src/content/courses/sunlitShoals';
 import kelpworks from '../../src/content/courses/kelpworks';
+import blacksmoker from '../../src/content/courses/blacksmokerRun';
 import type { CourseDefinition } from '../../src/game/course/courseDefinition';
 import {
   createAssetCache,
@@ -10,6 +11,8 @@ import {
 } from '../../src/game/assets/AssetCache';
 import {
   collisionAsset,
+  blackCollisionAsset,
+  blackVisualAsset,
   kelpCollisionAsset,
   kelpVisualAsset,
   localAssetLoader,
@@ -36,7 +39,9 @@ async function setup(path = collisionAsset, course: CourseDefinition = sunlit) {
         lease.root,
         course,
         path,
-        path === collisionAsset || path === kelpCollisionAsset
+        path === collisionAsset ||
+          path === kelpCollisionAsset ||
+          path === blackCollisionAsset
           ? 'collision'
           : 'visual',
       ),
@@ -54,6 +59,8 @@ it.each([
   { path: visualAsset, course: sunlit },
   { path: kelpCollisionAsset, course: kelpworks },
   { path: kelpVisualAsset, course: kelpworks },
+  { path: blackCollisionAsset, course: blacksmoker },
+  { path: blackVisualAsset, course: blacksmoker },
 ])(
   'accepts actual GLTFLoader committed $path bytes',
   async ({ path, course }) => {
@@ -67,11 +74,72 @@ it.each([
   { path: visualAsset, course: kelpworks },
   { path: kelpCollisionAsset, course: sunlit },
   { path: kelpVisualAsset, course: sunlit },
+  { path: blackCollisionAsset, course: sunlit },
+  { path: blackVisualAsset, course: sunlit },
+  { path: blackCollisionAsset, course: kelpworks },
+  { path: blackVisualAsset, course: kelpworks },
+  { path: collisionAsset, course: blacksmoker },
+  { path: visualAsset, course: blacksmoker },
+  { path: kelpCollisionAsset, course: blacksmoker },
+  { path: kelpVisualAsset, course: blacksmoker },
 ])(
   'rejects actual $path bytes paired with the wrong course',
   async ({ path, course }) => {
     const { validate } = await setup(path, course);
     expect(validate).toThrow(/solid/);
+  },
+);
+
+it.each([
+  {
+    kind: 'identity',
+    error: /^Invalid course asset: scene asset identity mismatch$/,
+  },
+  { kind: 'missing', error: /^Invalid course asset: missing static solids$/ },
+  {
+    kind: 'extra',
+    error: /^Invalid course asset: solid identity smoker-extra$/,
+  },
+  {
+    kind: 'decoration',
+    error:
+      /^Invalid course asset: unsupported colliding node decor-smoker-forbidden$/,
+  },
+  { kind: 'surface', error: /^solid .*surface/ },
+  {
+    kind: 'transform',
+    error: /^Invalid course asset: world transform smoker-seabed$/,
+  },
+])(
+  'rejects Blacksmoker collision $kind after actual GLTFLoader parsing',
+  async ({ kind, error }) => {
+    const { root, validate } = await setup(blackCollisionAsset, blacksmoker);
+    expect(validate).not.toThrow();
+    const solid = mesh(root, 'smoker-seabed');
+    if (kind === 'identity') originalMetadata(root).asset = kelpCollisionAsset;
+    if (kind === 'missing') mesh(root, 'smoker-cinder-vent').removeFromParent();
+    if (kind === 'extra') {
+      const extra = solid.clone();
+      extra.name = 'smoker-extra';
+      originalMetadata(extra).id = extra.name;
+      root.add(extra);
+    }
+    if (kind === 'decoration') {
+      const decor = solid.clone();
+      decor.name = 'decor-smoker-forbidden';
+      decor.userData.reefRush = {
+        version: 1,
+        role: 'decoration',
+        collides: false,
+      };
+      root.add(decor);
+    }
+    if (kind === 'surface')
+      mesh(root, 'smoker-west-root')
+        .geometry.getAttribute('position')
+        .setXYZ(10, 0, 0, 0);
+    if (kind === 'transform') solid.position.x++;
+    expect(validate).toThrow(error);
   },
 );
 

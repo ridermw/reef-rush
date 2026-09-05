@@ -43,14 +43,16 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it('loads generated Blacksmoker without activating availability', async () => {
+  it('loads original gltf Blacksmoker without activating availability', async () => {
     await expect(
       loadCourseDefinition('blacksmoker-run'),
     ).resolves.toMatchObject({
       courseId: 'blacksmoker-run',
       name: COURSE_NAMES['blacksmoker-run'],
       visuals: {
-        kind: 'generated',
+        kind: 'gltf',
+        visualAsset: 'courses/blacksmoker-run.visual.glb',
+        collisionAsset: 'courses/blacksmoker-run.collision.glb',
         waterColor: '#102b3a',
         seabedColor: '#293c46',
       },

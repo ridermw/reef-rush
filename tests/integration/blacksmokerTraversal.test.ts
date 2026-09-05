@@ -78,7 +78,7 @@ afterEach(() => {
   for (const runtime of scenes.splice(0)) runtime.dispose();
 });
 
-it('authors the generated trench, six ordered checkpoints and pearls, nine solids, three currents and gates', async () => {
+it('authors the original trench, six ordered checkpoints and pearls, nine solids, three currents and gates', async () => {
   const course = await loadCourseDefinition('blacksmoker-run');
   const metadata = COURSES.find(({ id }) => id === 'blacksmoker-run');
   expect(course).toMatchObject({
@@ -87,7 +87,9 @@ it('authors the generated trench, six ordered checkpoints and pearls, nine solid
     name: metadata?.name,
     summary: metadata?.summary,
     visuals: {
-      kind: 'generated',
+      kind: 'gltf',
+      visualAsset: 'courses/blacksmoker-run.visual.glb',
+      collisionAsset: 'courses/blacksmoker-run.collision.glb',
       waterColor: '#102b3a',
       seabedColor: '#293c46',
     },

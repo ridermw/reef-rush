@@ -17,9 +17,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import sunlit from '../../src/content/courses/sunlitShoals';
 import kelpworks from '../../src/content/courses/kelpworks';
+import blacksmoker from '../../src/content/courses/blacksmokerRun';
 import {
   ASSET_PATHS,
   colliderContract,
+  courseSourcePaths,
   validateGlb,
   validateAssetSet,
   validateProject,
@@ -32,6 +34,8 @@ const paths = [
   'courses/sunlit-shoals.collision.glb',
   'courses/kelpworks.visual.glb',
   'courses/kelpworks.collision.glb',
+  'courses/blacksmoker-run.visual.glb',
+  'courses/blacksmoker-run.collision.glb',
 ] as const;
 const assetRoot = resolve('public', 'assets');
 const solids = sunlit.objects.filter(
@@ -40,21 +44,39 @@ const solids = sunlit.objects.filter(
 const kelpSolids = kelpworks.objects.filter(
   (object) => object.type === 'box' || object.type === 'sphere',
 );
+const blackSolids = blacksmoker.objects.filter(
+  (object) => object.type === 'box' || object.type === 'sphere',
+);
 const courseCases = [
-  { id: 'sunlit-shoals', course: sunlit, solids, assets: [paths[2], paths[3]] },
+  {
+    id: 'sunlit-shoals',
+    course: sunlit,
+    solids,
+    assets: [paths[2], paths[3]],
+    ceiling: -7.5,
+  },
   {
     id: 'kelpworks',
     course: kelpworks,
     solids: kelpSolids,
     assets: [paths[4], paths[5]],
+    ceiling: -7.5,
+  },
+  {
+    id: 'blacksmoker-run',
+    course: blacksmoker,
+    solids: blackSolids,
+    assets: [paths[6], paths[7]],
+    ceiling: -12.5,
   },
 ] as const;
 const sourcePaths = {
   'sunlit-shoals': resolve('assets', 'source', 'sunlit-assets.json'),
   kelpworks: resolve('assets', 'source', 'kelpworks-assets.json'),
+  'blacksmoker-run': resolve('assets', 'source', 'blacksmoker-assets.json'),
 };
 const sourceRejection =
-  /^(?:Invalid original source:|(?:sunlit-shoals|kelpworks) requires exactly (?:5|7) authored solids with the required identities$)/;
+  /^(?:Invalid original source:|sunlit-shoals requires exactly 5 authored solids with the required identities$|kelpworks requires exactly 7 authored solids with the required identities$|blacksmoker-run requires exactly 9 authored solids with the required identities$)/;
 const courseAssets = courseCases.flatMap(({ course, solids, assets }) =>
   assets.map((asset) => ({ course, solids, asset })),
 );
@@ -74,6 +96,14 @@ const originalHashes = [
   [
     paths[3],
     '4bbf9f8e3d93b384acf2fb5eda08244fc80dac81c16470318085139b424d325d',
+  ],
+  [
+    paths[4],
+    '2c499996154cabc31b52dd80815f27e5de3ac06ad64db0f4b3f33e940f1835c3',
+  ],
+  [
+    paths[5],
+    'b1b931a1e91f35b6225deddb5a90c0a5bd6d09270605dc64368f44fb41ee8be6',
   ],
 ] as const;
 
@@ -95,7 +125,7 @@ function expectVector(actual: readonly number[], expected: readonly number[]) {
 }
 
 describe('original asset source and output contract', () => {
-  it('requires the complete six-output set with independent five/seven-solid courses', async () => {
+  it('requires the complete eight-output set with independent five/seven/nine-solid courses', async () => {
     expect(ASSET_PATHS).toEqual(paths);
     const reports = await validateProject(resolve('.'));
     expect(
@@ -107,7 +137,13 @@ describe('original asset source and output contract', () => {
       [paths[3], 5],
       [paths[4], 7],
       [paths[5], 7],
+      [paths[6], 9],
+      [paths[7], 9],
     ]);
+  });
+
+  it('binds all three explicit source filenames to their course identities', () => {
+    expect(courseSourcePaths(resolve('.'))).toEqual(sourcePaths);
   });
 
   it.each(courseCases)(
@@ -673,7 +709,7 @@ const mutations: Mutation[] = [
       b[write](value, start + width);
     },
   },
-  ...([paths[2], paths[4]] as const).map((asset): Mutation => ({
+  ...([paths[2], paths[4], paths[6]] as const).map((asset): Mutation => ({
     name: `${asset} node budget`,
     asset,
     error: /mesh node budget/i,
@@ -688,37 +724,148 @@ const mutations: Mutation[] = [
       }
     },
   })),
-  ...([paths[0], paths[2], paths[4]] as const).map((asset): Mutation => ({
-    name: `${asset} triangle budget`,
-    asset,
-    error: /triangle budget/i,
-    edit: (d) => {
-      const node = d.nodes.reduce((best, n) => {
-        const count = (m: number) =>
-          d.meshes[m].primitives.reduce(
-            (total, p) => total + d.accessors[p.indices].count,
+  ...([paths[0], paths[2], paths[4], paths[6]] as const).map(
+    (asset): Mutation => ({
+      name: `${asset} triangle budget`,
+      asset,
+      error: /triangle budget/i,
+      edit: (d) => {
+        const node = d.nodes.reduce((best, n) => {
+          const count = (m: number) =>
+            d.meshes[m].primitives.reduce(
+              (total, p) => total + d.accessors[p.indices].count,
+              0,
+            );
+          return count(n.mesh) > count(best.mesh) ? n : best;
+        });
+        const target = asset === paths[0] ? 10001 : 100001;
+        let triangles = 0;
+        while (triangles < target) {
+          const copy = structuredClone(node);
+          copy.name = `budget-${d.nodes.length}`;
+          d.scenes[0].nodes.push(d.nodes.length);
+          d.nodes.push(copy);
+          triangles += d.meshes[node.mesh].primitives.reduce(
+            (t, p) => t + d.accessors[p.indices].count / 3,
             0,
           );
-        return count(n.mesh) > count(best.mesh) ? n : best;
-      });
-      const target = asset === paths[0] ? 10001 : 100001;
-      let triangles = 0;
-      while (triangles < target) {
-        const copy = structuredClone(node);
-        copy.name = `budget-${d.nodes.length}`;
-        d.scenes[0].nodes.push(d.nodes.length);
-        d.nodes.push(copy);
-        triangles += d.meshes[node.mesh].primitives.reduce(
-          (t, p) => t + d.accessors[p.indices].count / 3,
-          0,
-        );
-      }
-    },
-  })),
+        }
+      },
+    }),
+  ),
 ];
 
 describe('bounded original GLB validator rejection', () => {
-  it.each([paths[0], paths[4], paths[5]])(
+  it.each([
+    { kind: 'identity', error: /^Scene asset identity mismatch$/ },
+    {
+      kind: 'missing ninth solid',
+      error: /^Missing mandatory solid node smoker-cinder-vent$/,
+    },
+    {
+      kind: 'extra solid',
+      error: /^solid smoker-extra metadata\/source mismatch$/,
+    },
+    {
+      kind: 'collision decoration',
+      error: /^Unexpected noncolliding node role$/,
+    },
+  ])(
+    'rejects Blacksmoker $kind with an intentional contract error',
+    async ({ kind, error }) => {
+      const file = resolve(assetRoot, paths[7]);
+      expect(
+        existsSync(file),
+        'Missing original Blacksmoker collision output',
+      ).toBe(true);
+      const bytes = await readFile(file);
+      expect(() => validateGlb(bytes, paths[7], blackSolids)).not.toThrow();
+      const { document, binary } = unpack(bytes);
+      if (kind === 'identity')
+        document.scenes[0].extras.reefRush.asset = paths[5];
+      if (kind === 'missing ninth solid') {
+        const index = document.nodes.findIndex(
+          (node) => node.name === 'smoker-cinder-vent',
+        );
+        document.nodes.splice(index, 1);
+        document.scenes[0].nodes = document.nodes.map((_, i) => i);
+      }
+      if (kind === 'extra solid' || kind === 'collision decoration') {
+        const extra = structuredClone(document.nodes[0]);
+        extra.name =
+          kind === 'extra solid' ? 'smoker-extra' : 'decor-forbidden';
+        extra.extras.reefRush =
+          kind === 'extra solid'
+            ? { ...extra.extras.reefRush, id: extra.name }
+            : { version: 1, role: 'decoration', collides: false };
+        document.scenes[0].nodes.push(document.nodes.length);
+        document.nodes.push(extra);
+      }
+      expect(() =>
+        validateGlb(pack(document, binary), paths[7], blackSolids),
+      ).toThrow(error);
+    },
+  );
+
+  it('rejects Blacksmoker central decoration fully below -7.5 but above -12.5 through the route guard', async () => {
+    const { scene } = await loadAsset(paths[6]);
+    const bytes = await readFile(resolve(assetRoot, paths[6]));
+    expect(() => validateGlb(bytes, paths[6], blackSolids)).not.toThrow();
+    const { document, binary } = unpack(bytes);
+    const decor = document.nodes.find((node) =>
+      node.name.startsWith('decor-'),
+    )!;
+    const node = scene.getObjectByName(decor.name)!;
+    decor.scale = [0.1, 0.1, 0.1];
+    decor.translation = [0, -10, 88];
+    node.scale.fromArray(decor.scale);
+    node.position.fromArray(decor.translation);
+    const bounds = new Box3().setFromObject(node);
+    expect(bounds.min.x).toBeGreaterThan(-9);
+    expect(bounds.max.x).toBeLessThan(9);
+    expect(bounds.min.y).toBeGreaterThan(-12.5);
+    expect(bounds.max.y).toBeLessThan(-7.5);
+    expect(decor.extras.reefRush).toEqual({
+      version: 1,
+      role: 'decoration',
+      collides: false,
+    });
+    expect(() =>
+      validateGlb(pack(document, binary), paths[6], blackSolids),
+    ).toThrow(/^Decoration must stay outside the route\/spawn ribbon$/);
+  });
+
+  it.each(courseCases)(
+    'uses transformed geometry rather than origins at the $id decoration ceiling',
+    async ({ assets, solids, ceiling }) => {
+      const { scene } = await loadAsset(assets[0]);
+      const { document, binary } = unpack(
+        await readFile(resolve(assetRoot, assets[0])),
+      );
+      const decor = document.nodes.find((node) =>
+        node.name.startsWith('decor-'),
+      )!;
+      const node = scene.getObjectByName(decor.name)!;
+      node.scale.setScalar(0.25);
+      node.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), 0.6);
+      node.position.set(0, 0, 88);
+      const localTop = new Box3().setFromObject(node).max.y;
+      expect(localTop).toBeGreaterThan(0.1);
+      decor.scale = node.scale.toArray();
+      decor.rotation = node.quaternion.toArray();
+      decor.translation = [0, ceiling - localTop - 0.1, 88];
+      expect(() =>
+        validateGlb(pack(document, binary), assets[0], solids),
+      ).not.toThrow();
+      decor.translation[1] += 0.2;
+      expect(decor.translation[1]).toBeLessThan(ceiling);
+      expect(() =>
+        validateGlb(pack(document, binary), assets[0], solids),
+      ).toThrow(/^Decoration must stay outside the route\/spawn ribbon$/);
+    },
+  );
+
+  it.each([paths[0], paths[4], paths[5], paths[6], paths[7]])(
     'enforces a decoded component budget before reading aliased/unused accessors: %s',
     async (asset) => {
       const { document, binary } = unpack(
@@ -745,7 +892,11 @@ describe('bounded original GLB validator rejection', () => {
         });
       try {
         expect(() =>
-          validateGlb(bytes, asset, asset === paths[0] ? [] : kelpSolids),
+          validateGlb(
+            bytes,
+            asset,
+            courseAssets.find((entry) => entry.asset === asset)?.solids ?? [],
+          ),
         ).toThrow(/decoded component budget/i);
         expect(decoding).not.toHaveBeenCalled();
       } finally {
@@ -759,7 +910,17 @@ describe('bounded original GLB validator rejection', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each([paths[0], paths[4], paths[5]])(
+  it('validates all eight committed GLBs with the default CLI without Blender', () => {
+    const result = spawnSync(process.execPath, ['tools/validate-assets.mjs'], {
+      cwd: resolve('.'),
+      encoding: 'utf8',
+      env: { ...process.env, BLENDER: 'deliberately-unavailable-blender' },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/8 original GLBs/);
+  });
+
+  it.each([paths[0], paths[4], paths[5], paths[6], paths[7]])(
     'rejects a missing required output: %s',
     async (asset) => {
       const root = await fixtureDirectory();
@@ -964,7 +1125,7 @@ describe('original fish and course geometry', () => {
 
   it.each(courseCases)(
     'places only explicitly noncolliding $course.courseId decoration outside the route and spawn corridor',
-    async ({ assets, solids }) => {
+    async ({ assets, solids, ceiling }) => {
       const { scene } = await loadAsset(assets[0]);
       let decorations = 0;
       scene.traverse((node) => {
@@ -982,7 +1143,7 @@ describe('original fish and course geometry', () => {
         const bounds = new Box3().setFromObject(node);
         // Entire authored route, checkpoint radii and spawn fit inside this open ribbon.
         expect(
-          bounds.max.x < -9 || bounds.min.x > 9 || bounds.max.y <= -7.5,
+          bounds.max.x < -9 || bounds.min.x > 9 || bounds.max.y <= ceiling,
         ).toBe(true);
       });
       expect(decorations).toBeGreaterThan(10);
@@ -1040,6 +1201,35 @@ describe('original fish and course geometry', () => {
       'seagrass-jade',
     ]) {
       expect(scene.getObjectByName(name)).toBeDefined();
+    }
+  });
+
+  it('shares three static merged basalt, copper and sulfur chimney/mineral variants along Blacksmoker sides', async () => {
+    const { scene, animations } = await loadAsset(paths[6]);
+    expect(animations).toEqual([]);
+    const decor = scene.children.filter((node) =>
+      node.name.startsWith('decor-'),
+    );
+    expect(decor).toHaveLength(30);
+    const geometries = new Set();
+    const colors = new Set();
+    for (const node of decor) {
+      if (!(node instanceof Mesh)) throw new Error('Expected merged vent mesh');
+      expect(node.name).toMatch(/^decor-vent-cluster-/);
+      expect(Math.abs(node.position.x)).toBeGreaterThanOrEqual(13);
+      geometries.add(node.geometry);
+      expect(node.material).toBeInstanceOf(MeshStandardMaterial);
+      colors.add((node.material as MeshStandardMaterial).color.getHexString());
+      const bounds = new Box3().setFromObject(node);
+      expect(bounds.max.y - bounds.min.y).toBeGreaterThan(3);
+    }
+    expect(geometries.size).toBe(3);
+    expect([...colors].sort()).toEqual(['27343b', 'a86542', 'c4ac59']);
+    const { document } = unpack(await readFile(resolve(assetRoot, paths[6])));
+    for (const node of document.nodes.filter((node) =>
+      node.name.startsWith('decor-'),
+    )) {
+      expect(document.meshes[node.mesh].primitives).toHaveLength(1);
     }
   });
 });
@@ -1123,15 +1313,40 @@ describe('reusable contract API and tooling errors', () => {
     ).toThrow(/authored solids/i);
   });
 
-  it('validates an explicit source map independently for both courses', async () => {
+  it('validates an explicit source map independently for all three courses', async () => {
     const reports = await validateAssetSet(assetRoot, sourcePaths);
     expect(reports.map(({ asset }) => asset)).toEqual(paths);
     await expect(
       validateAssetSet(assetRoot, {
+        ...sourcePaths,
         'sunlit-shoals': sourcePaths.kelpworks,
         kelpworks: sourcePaths['sunlit-shoals'],
       }),
-    ).rejects.toThrow(/source.*identity/i);
+    ).rejects.toThrow(/^Original source identity mismatch for sunlit-shoals$/);
+  });
+
+  it.each(['sunlit-shoals', 'kelpworks'] as const)(
+    'rejects a Blacksmoker source swapped with %s, not a missing third map entry',
+    async (id) => {
+      await expect(
+        validateAssetSet(assetRoot, {
+          ...sourcePaths,
+          [id]: sourcePaths['blacksmoker-run'],
+          'blacksmoker-run': sourcePaths[id],
+        }),
+      ).rejects.toThrow(
+        new RegExp(`^Original source identity mismatch for ${id}$`),
+      );
+    },
+  );
+
+  it('rejects a missing third source map entry explicitly', async () => {
+    await expect(
+      validateAssetSet(assetRoot, {
+        'sunlit-shoals': sourcePaths['sunlit-shoals'],
+        kelpworks: sourcePaths.kelpworks,
+      } as typeof sourcePaths),
+    ).rejects.toThrow(/^Invalid original course source map:/);
   });
 
   it('does not mistake unavailable outputs for malformed sources', async () => {

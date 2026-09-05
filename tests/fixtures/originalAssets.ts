@@ -10,6 +10,8 @@ export const collisionAsset = 'courses/sunlit-shoals.collision.glb';
 export const fishAsset = 'fish/sunfin.glb';
 export const kelpVisualAsset = 'courses/kelpworks.visual.glb';
 export const kelpCollisionAsset = 'courses/kelpworks.collision.glb';
+export const blackVisualAsset = 'courses/blacksmoker-run.visual.glb';
+export const blackCollisionAsset = 'courses/blacksmoker-run.collision.glb';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
