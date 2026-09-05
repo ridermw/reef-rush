@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:bootstrap": "node --test tests/bootstrap/lockfile.test.mjs",
+    "test:bootstrap": "node --test tests/bootstrap/lockfile.test.mjs tests/bootstrap/ci.test.mjs",
     "test:watch": "vitest",
     "test:browser": "playwright test",
     "assets:generate": "node tools/generate-assets.mjs",

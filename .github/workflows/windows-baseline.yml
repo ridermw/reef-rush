@@ -1,6 +1,11 @@
 name: Windows dependency baseline
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - docs/handoffs/2026-09-04-reef-rush.md
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -9,26 +14,71 @@ permissions:
 jobs:
   baseline:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-browser-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out the requested revision
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select the pinned Node runtime
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        timeout-minutes: 1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
       - name: Restore public locked dependencies
+        timeout-minutes: 2
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
         run: npm run test:bootstrap && npm ci --no-audit --no-fund
       - name: Export only the npm content cache
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_dispatch'
+        timeout-minutes: 1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-cache-windows-x64
           path: ${{ runner.temp }}\reef-rush-npm-cache\_cacache
           if-no-files-found: error
           retention-days: 2
       - name: Run the required baseline
+        timeout-minutes: 3
         run: npm run validate
+      - name: Install the pinned Chromium browser
+        timeout-minutes: 2
+        run: npm exec -- playwright install chromium
+      - name: Run the complete browser suite
+        timeout-minutes: 29
+        run: npm run test:browser
+      - name: Restore and check normal production output
+        timeout-minutes: 1
+        env:
+          VITE_TEST_HOOKS: 'false'
+        shell: pwsh
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $files = @(Get-ChildItem -Path dist -Recurse -File -Filter '*.js')
+          if ($files.Count -eq 0) {
+            throw 'No emitted JavaScript found.'
+          }
+          $matches = @($files | Select-String -SimpleMatch '__REEF_RUSH_TEST__' -List)
+          if ($matches.Count -gt 0) {
+            throw 'Acceptance hooks found in normal production output.'
+          }
+      - name: Retain browser evidence
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-evidence-windows-x64
+          path: |
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results.json
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\report
+          if-no-files-found: warn
+          # Runner deadlines can leave useful raw evidence in hidden directories.
+          include-hidden-files: true
+          retention-days: 7
