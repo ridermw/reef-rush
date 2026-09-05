@@ -145,9 +145,22 @@ test('all phase bounds fit the measured 45-minute budget with collection headroo
   assert.match(config, /globalTimeout:.*1_680_000.*0/);
 });
 
-test('the shared browser root is run/attempt isolated and inherited from the job environment', () => {
-  assert.ok(
-    workflow.includes(`      REEF_RUSH_BROWSER_ARTIFACTS: ${artifactRoot}\n`),
+test('the shared browser root uses valid step contexts even when earlier steps fail', () => {
+  const jobHeader = workflow.split('    steps:')[0];
+  assert.doesNotMatch(jobHeader, /\$\{\{\s*runner\./);
+  for (const name of [
+    'Run the complete browser suite',
+    'Retain browser evidence',
+  ])
+    assert.ok(
+      step(name).includes(
+        `        env:\n          REEF_RUSH_BROWSER_ARTIFACTS: ${artifactRoot}\n`,
+      ),
+      `Missing independently resolved step root for ${name}`,
+    );
+  assert.equal(
+    (workflow.match(/REEF_RUSH_BROWSER_ARTIFACTS:/g) ?? []).length,
+    2,
   );
   assert.match(config, /process\.env\.REEF_RUSH_BROWSER_ARTIFACTS/);
 });

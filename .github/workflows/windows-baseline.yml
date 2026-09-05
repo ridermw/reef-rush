@@ -15,8 +15,6 @@ jobs:
   baseline:
     runs-on: windows-2022
     timeout-minutes: 45
-    env:
-      REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-browser-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out the requested revision
         timeout-minutes: 1
@@ -51,6 +49,9 @@ jobs:
         run: npm exec -- playwright install chromium
       - name: Run the complete browser suite
         timeout-minutes: 29
+        # runner.temp is unavailable in job env; collection repeats this root.
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-browser-${{ github.run_id }}-${{ github.run_attempt }}
         run: npm run test:browser
       - name: Restore and check normal production output
         timeout-minutes: 1
@@ -71,6 +72,8 @@ jobs:
       - name: Retain browser evidence
         if: always()
         timeout-minutes: 2
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-browser-${{ github.run_id }}-${{ github.run_attempt }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-evidence-windows-x64
