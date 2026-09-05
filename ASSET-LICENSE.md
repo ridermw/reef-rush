@@ -74,6 +74,9 @@ current typed Sunlit solids directly; `validateProject` also checks both
 project license files. The command uses the portable JSON source; the focused
 tests additionally compare that entire source solid array and both course
 outputs to the live `sunlitShoals.ts` definition, preventing silent source drift.
+The runtime shares the pure `src/game/assets/staticSolidContract.mjs` checks
+and validates loaded objects in `validateLoadedCourseAsset.ts`; it does not
+import the filesystem based validator into the browser.
 
 Each scene has `extras.reefRush` with `profile: "reef-rush-original-v1"`, its
 relative asset path, `up: "+Y"`, `forward: "+Z"`, `metersPerUnit: 1` and `seed`.
