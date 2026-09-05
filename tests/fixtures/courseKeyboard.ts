@@ -1,23 +1,29 @@
 import { expect, type Page } from '@playwright/test';
-import kelpworks from '../../src/content/courses/kelpworks';
 import type { HostSnapshot } from '../../src/game/core/GameHost';
 import type { SceneSnapshot } from '../../src/game/core/SceneRuntime';
+import type { CourseDefinition } from '../../src/game/course/courseDefinition';
 import {
   advanceCourseWaypoint,
   courseSteeringTarget,
   courseWaypoints,
 } from './courseTraversal';
 import { keyboardSurface, snapshot } from '../browser/acceptance-helpers';
+import {
+  courseKeyboardPolicy,
+  type CourseKey,
+  type KeyboardObservation,
+} from './courseKeyboardPolicy';
 
 // Binary native keys, not the normalized fixed-step controller. The authored
 // policy advances only on observed checkpoint crossings and actual pearl IDs.
-export async function driveKelpworks(
+export async function driveCourseByKeyboard(
   page: Page,
-  onDeepCheckpoint?: (state: HostSnapshot) => Promise<void>,
+  course: CourseDefinition,
+  onCheckpoint?: (state: HostSnapshot) => Promise<void>,
 ) {
   await keyboardSurface(page);
-  const goals = courseWaypoints(kelpworks);
-  const held = new Set<string>();
+  const goals = courseWaypoints(course);
+  const held = new Set<CourseKey>();
   const checkpoints: number[] = [];
   const pearlIds = new Set<string>();
   const milestones: Array<{
@@ -30,7 +36,18 @@ export async function driveKelpworks(
   const recoveries = new Set<string>();
   let waypoint = 0;
   let approachingCheckpoint = false;
-  let capturedDeep = false;
+  let capturedCheckpoint = 0;
+  let previous: KeyboardObservation | undefined;
+  const keyPolicy: Array<
+    KeyboardObservation &
+      ReturnType<typeof courseKeyboardPolicy> & {
+        goalId: string;
+        target: readonly [number, number, number];
+        observedStepDelta: number;
+        elapsedMs: number;
+        approachingCheckpoint: boolean;
+      }
+  > = [];
   let state = await snapshot(page);
   const initialSteps = state.frame.steps;
   const started = Date.now();
@@ -39,10 +56,10 @@ export async function driveKelpworks(
   function observe(current: HostSnapshot): SceneSnapshot {
     if (!current.player || !current.race)
       throw new Error(
-        `Missing active Kelpworks race/player: ${JSON.stringify(current)}`,
+        `Missing active ${course.courseId} race/player: ${JSON.stringify(current)}`,
       );
     const { player, race, collectedPearlIds } = current;
-    expect(race.courseId).toBe('kelpworks');
+    expect(race.courseId).toBe(course.courseId);
     expect(collectedPearlIds.length).toBe(race.pearlCount);
     if (race.checkpointIndex !== (checkpoints.at(-1) ?? 0)) {
       if (race.status !== 'finished') {
@@ -54,7 +71,7 @@ export async function driveKelpworks(
       }
       checkpoints.push(race.checkpointIndex);
       milestones.push({
-        id: kelpworks.checkpoints[race.checkpointIndex - 1].id,
+        id: course.checkpoints[race.checkpointIndex - 1].id,
         steps: current.frame.steps - initialSteps,
         position: player.position,
       });
@@ -78,9 +95,9 @@ export async function driveKelpworks(
       state.frame.steps - initialSteps < 9000
     ) {
       const observed = observe(state);
-      if (!capturedDeep && observed.race.checkpointIndex === 3) {
-        capturedDeep = true;
-        await onDeepCheckpoint?.(state);
+      if (onCheckpoint && observed.race.checkpointIndex > capturedCheckpoint) {
+        capturedCheckpoint = observed.race.checkpointIndex;
+        await onCheckpoint(state);
         state = await snapshot(page);
         continue;
       }
@@ -97,26 +114,26 @@ export async function driveKelpworks(
       if (approachingCheckpoint && !recoveries.has(goal.id)) {
         recoveries.add(goal.id);
         console.info(
-          `Native Kelpworks recovery: ${JSON.stringify({ goal, observed, steps: state.frame.steps })}`,
+          `Native ${course.courseId} recovery: ${JSON.stringify({ goal, observed, steps: state.frame.steps })}`,
         );
       }
-      const { fish } = observed;
-      const dx = steering.target[0] - fish.position[0];
-      const dy = steering.target[1] - fish.position[1];
-      const dz = steering.target[2] - fish.position[2];
-      const yawError = Math.atan2(
-        Math.sin(Math.atan2(dx, dz) - fish.yaw),
-        Math.cos(Math.atan2(dx, dz) - fish.yaw),
-      );
-      const pitch = Math.atan2(dy, Math.max(1, Math.hypot(dx, dz)));
-      const keys = new Set<string>();
-      if (Math.abs(yawError) > 0.025) keys.add(yawError > 0 ? 'a' : 'd');
-      if (Math.abs(pitch - fish.pitch) > 0.06)
-        keys.add(pitch > fish.pitch ? 'ArrowUp' : 'ArrowDown');
-      const speed = Math.hypot(...fish.velocity);
-      if (speed > 4) keys.add('s');
-      else if (speed < 3) keys.add('w');
-      if (Math.abs(yawError) > 0.6) keys.add('Shift');
+      const observation = { fish: observed.fish, steps: state.frame.steps };
+      const decision = courseKeyboardPolicy({
+        observation,
+        previous,
+        target: steering.target,
+      });
+      keyPolicy.push({
+        ...observation,
+        ...decision,
+        goalId: goal.id,
+        target: steering.target,
+        observedStepDelta: previous ? observation.steps - previous.steps : 0,
+        elapsedMs: observed.race.elapsedMs,
+        approachingCheckpoint,
+      });
+      previous = observation;
+      const keys = new Set(decision.keys);
       for (const key of held) {
         if (!keys.has(key)) {
           await page.keyboard.up(key);
@@ -130,7 +147,7 @@ export async function driveKelpworks(
         }
       }
       const nextFrame = await page.evaluate(
-        (previous) =>
+        ({ previous, courseId }) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
             (resolve, reject) => {
               const start = performance.now();
@@ -146,7 +163,7 @@ export async function driveKelpworks(
                 } else if (performance.now() - start > 5000) {
                   reject(
                     new Error(
-                      `Native Kelpworks stopped advancing: ${JSON.stringify(next)}`,
+                      `Native ${courseId} stopped advancing: ${JSON.stringify(next)}`,
                     ),
                   );
                 } else requestAnimationFrame(read);
@@ -154,11 +171,14 @@ export async function driveKelpworks(
               requestAnimationFrame(read);
             },
           ),
-        state.frame.steps,
+        { previous: state.frame.steps, courseId: course.courseId },
       );
       state = nextFrame.state;
       if (state.race) {
-        if (nextFrame.hud[1] === `${state.race.checkpointIndex} / 5`)
+        if (
+          nextFrame.hud[1] ===
+          `${state.race.checkpointIndex} / ${course.checkpoints.length}`
+        )
           hudCheckpoints.add(state.race.checkpointIndex);
         if (nextFrame.hud[2] === String(state.race.pearlCount))
           hudPearls.add(state.race.pearlCount);
@@ -168,7 +188,7 @@ export async function driveKelpworks(
   } finally {
     for (const key of held) await page.keyboard.up(key);
     console.info(
-      `Native Kelpworks observation: ${JSON.stringify({
+      `Native ${course.courseId} observation: ${JSON.stringify({
         waypoint,
         steps: state.frame.steps - initialSteps,
         wallMs: Date.now() - started,
@@ -181,23 +201,26 @@ export async function driveKelpworks(
   expect(state.screen, JSON.stringify({ waypoint, state, milestones })).toBe(
     'results',
   );
-  expect(checkpoints).toEqual([1, 2, 3, 4, 5]);
-  const expectedIds = kelpworks.pearls.map((pearl) => pearl.id);
+  const expectedCheckpoints = course.checkpoints.map((_, index) => index + 1);
+  expect(checkpoints).toEqual(expectedCheckpoints);
+  const expectedIds = (course.pearls ?? []).map((pearl) => pearl.id);
   expect([...pearlIds]).toEqual(expectedIds);
   expect(state.collectedPearlIds).toEqual(expectedIds);
-  for (const checkpoint of [1, 2, 3, 4])
+  for (const checkpoint of expectedCheckpoints.slice(0, -1))
     expect(hudCheckpoints.has(checkpoint)).toBe(true);
-  for (const count of [1, 2, 3, 4, 5]) expect(hudPearls.has(count)).toBe(true);
+  for (let count = 1; count <= expectedIds.length; count++)
+    expect(hudPearls.has(count)).toBe(true);
   expect(state.race).toMatchObject({
     status: 'finished',
-    checkpointIndex: 5,
-    checkpointCount: 5,
-    pearlCount: 5,
-    totalPearls: 5,
+    checkpointIndex: course.checkpoints.length,
+    checkpointCount: course.checkpoints.length,
+    pearlCount: expectedIds.length,
+    totalPearls: expectedIds.length,
   });
   const result = state.race?.result;
-  if (!result) throw new Error('Actual Kelpworks finish has no result.');
-  const limits = kelpworks.medalTimesMs;
+  if (!result)
+    throw new Error(`Actual ${course.courseId} finish has no result.`);
+  const limits = course.medalTimesMs;
   expect(result.medal).toBe(
     result.elapsedMs <= limits.gold
       ? 'gold'
@@ -217,5 +240,6 @@ export async function driveKelpworks(
     recoveries: [...recoveries],
     hudCheckpoints: [...hudCheckpoints],
     hudPearls: [...hudPearls],
+    keyPolicy,
   };
 }

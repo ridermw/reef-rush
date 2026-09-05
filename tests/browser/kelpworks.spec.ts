@@ -5,7 +5,7 @@ import {
   updateProgress,
 } from '../../src/game/progression/progress';
 import { DEFAULT_SETTINGS } from '../../src/settings/settings';
-import { driveKelpworks } from '../fixtures/kelpworksKeyboard';
+import { driveCourseByKeyboard } from '../fixtures/courseKeyboard';
 import {
   driveSunlit,
   expectDraw,
@@ -206,19 +206,25 @@ test('actual Sunlit earns lazy Kelpworks, native five-pearl finishes, replay and
   await expectHealthyAudio();
   const draw = await expectDraw(page);
   const screenshotPath = testInfo.outputPath('kelpworks-deep-active.png');
-  const first = await driveKelpworks(page, async (observed) => {
-    expect(observed.screen).toBe('playing');
-    expect(observed.race?.checkpointIndex).toBe(3);
-    if (!observed.player) throw new Error('Missing active screenshot player.');
-    await page.screenshot({ path: screenshotPath });
-    await testInfo.attach('Kelpworks active deep checkpoint', {
-      path: screenshotPath,
-      contentType: 'image/png',
-    });
-    console.info(
-      `Active Kelpworks screenshot: ${screenshotPath}; observed endpoint: ${JSON.stringify(observed.player.position)}`,
-    );
-  });
+  const first = await driveCourseByKeyboard(
+    page,
+    kelpworks,
+    async (observed) => {
+      if (observed.race?.checkpointIndex !== 3) return;
+      expect(observed.screen).toBe('playing');
+      expect(observed.race?.checkpointIndex).toBe(3);
+      if (!observed.player)
+        throw new Error('Missing active screenshot player.');
+      await page.screenshot({ path: screenshotPath });
+      await testInfo.attach('Kelpworks active deep checkpoint', {
+        path: screenshotPath,
+        contentType: 'image/png',
+      });
+      console.info(
+        `Active Kelpworks screenshot: ${screenshotPath}; observed endpoint: ${JSON.stringify(observed.player.position)}`,
+      );
+    },
+  );
   await expect(page.locator('.results-time')).toHaveText(
     timeLabel(first.result.elapsedMs),
   );
@@ -289,7 +295,7 @@ test('actual Sunlit earns lazy Kelpworks, native five-pearl finishes, replay and
   await expect
     .poll(() => snapshot(page))
     .toMatchObject({ audio: { activeAmbience: 1 } });
-  const replay = await driveKelpworks(page);
+  const replay = await driveCourseByKeyboard(page, kelpworks);
   progress = updateProgress(progress, replay.result);
   await expect.poll(() => stored(page, progressKey)).toEqual(progress);
   expect((await snapshot(page)).audio.emittedCues.finish).toBe(3);
