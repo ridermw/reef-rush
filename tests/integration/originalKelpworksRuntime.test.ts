@@ -172,7 +172,7 @@ it.each(['fast', 'conservative'] as const)(
     expect(new Set(materials.mock.contexts).size).toBe(
       materials.mock.calls.length,
     );
-    expect(COURSES.find(({ id }) => id === 'kelpworks')?.available).toBe(false);
+    expect(COURSES.find(({ id }) => id === 'kelpworks')?.available).toBe(true);
     console.info(
       `Original/generated Kelpworks ${profile}: ${JSON.stringify({
         ...reviewed[profile],

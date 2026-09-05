@@ -74,7 +74,7 @@ export function createRunFeedback() {
         add(
           event.type,
           event.type === 'checkpoint'
-            ? `Checkpoint ${event.checkpointIndex} cleared`
+            ? `Checkpoint ${event.checkpointIndex + 1} cleared`
             : labels[event.type],
         );
       }

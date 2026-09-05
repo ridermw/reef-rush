@@ -65,9 +65,6 @@ export async function selectSunlit(page: Page) {
     page.getByRole('heading', { name: 'Choose a course' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Kelpworks - not yet available' }),
-  ).toBeDisabled();
-  await expect(
     page.getByRole('button', { name: 'Blacksmoker Run - not yet available' }),
   ).toBeDisabled();
   await page.getByRole('button', { name: 'Load Sunlit Shoals' }).click();

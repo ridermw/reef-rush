@@ -285,11 +285,12 @@ it('earns gold and conservative bronze through real controls, with stable owners
           updateProgress(emptyProgress(), snapshot.race.result),
         ),
       ).toEqual(['sunlit-shoals']);
+      expect(COURSES.find(({ id }) => id === 'kelpworks')?.available).toBe(
+        true,
+      );
       expect(
-        COURSES.filter(({ id }) => id !== 'sunlit-shoals').every(
-          ({ available }) => !available,
-        ),
-      ).toBe(true);
+        COURSES.find(({ id }) => id === 'blacksmoker-run')?.available,
+      ).toBe(false);
       elapsed[profile].push(snapshot.race.elapsedMs);
       expect(runtime.getDiagnostics()).toEqual(counts);
       runtime.dispose();

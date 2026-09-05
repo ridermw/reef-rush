@@ -22,7 +22,7 @@ export const COURSES: readonly CourseSummary[] = [
   },
   {
     id: 'kelpworks',
-    available: false,
+    available: true,
     name: 'Kelpworks',
     summary: 'Dense kelp lanes and drifting corners raise the pace.',
   },

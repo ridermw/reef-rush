@@ -87,6 +87,7 @@ export interface HostSnapshot {
   readonly screen: AppScreen;
   readonly player: SceneFishState | null;
   readonly race: RaceState | null;
+  readonly collectedPearlIds: readonly string[];
   readonly lifecycle:
     'idle' | 'loading' | 'active' | 'cleanup-pending' | 'disposed';
   readonly cleanupError: string | null;
@@ -377,6 +378,7 @@ export class GameHost {
       screen: this.store.getState().screen,
       player: snapshot?.fish ?? null,
       race: snapshot?.race ?? null,
+      collectedPearlIds: snapshot?.collectedPearlIds ?? [],
       lifecycle: this.pendingReleases.length
         ? 'cleanup-pending'
         : this.disposed

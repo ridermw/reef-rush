@@ -115,7 +115,9 @@ test('real keyboard Sunlit finish and queued native save merge newer version 1 r
   await expect(page.getByRole('status')).toHaveCount(0);
   expect((await snapshot(page)).resources.pendingCleanup).toBe(0);
   await page.getByRole('button', { name: 'Dive in' }).click();
-  await expect(page.getByRole('button', { name: /Kelpworks/ })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Load Kelpworks', exact: true }),
+  ).toBeEnabled();
   console.info(
     'Native Web Lock: results and title before release; closing owner released queued save; latest valid records merged.',
   );

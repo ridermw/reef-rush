@@ -1951,9 +1951,48 @@ describe('terminal progress and diagnostics', () => {
     expect(h.store.getState().progressNotice).toBeNull();
   });
 
+  it('observes actual collected pearl identities from the active real scene', async () => {
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+    });
+    await h.load();
+    expect(h.host.getSnapshot()).toMatchObject({ collectedPearlIds: [] });
+    key('KeyW');
+    h.frame(100);
+    expect(h.runtimes[0].getSnapshot().collectedPearlIds).toEqual(['pearl']);
+    expect(h.host.getSnapshot()).toMatchObject({
+      collectedPearlIds: ['pearl'],
+      race: { pearlCount: 1, status: 'finished' },
+    });
+  });
+
+  it('observes empty pearl identities before loading and after returning to title or disposal', async () => {
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+    });
+    expect(h.host.getSnapshot()).toMatchObject({ collectedPearlIds: [] });
+    await h.load();
+    key('KeyW');
+    h.frame(100);
+    expect(h.host.getSnapshot()).toMatchObject({
+      collectedPearlIds: ['pearl'],
+    });
+    h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+    await h.host.whenIdle();
+    expect(h.host.getSnapshot()).toMatchObject({
+      screen: 'title',
+      player: null,
+      collectedPearlIds: [],
+    });
+    await h.host.dispose();
+    expect(h.host.getSnapshot()).toMatchObject({ collectedPearlIds: [] });
+  });
+
   it('exposes only cloned deeply frozen observations when the test flag is enabled, and removes the hook', async () => {
     vi.stubEnv('VITE_TEST_HOOKS', 'true');
-    const h = await setup();
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+    });
     await h.load();
     expect(window.__REEF_RUSH_TEST__).toBeDefined();
     const hook = window.__REEF_RUSH_TEST__!;
@@ -1966,6 +2005,21 @@ describe('terminal progress and diagnostics', () => {
     expect(() =>
       Object.assign(snapshot.player!.position, { 0: 500 }),
     ).toThrow();
+    expect(snapshot).toMatchObject({ collectedPearlIds: [] });
+    key('KeyW');
+    h.frame(100);
+    const collected = hook.getSnapshot();
+    expect(collected).toMatchObject({ collectedPearlIds: ['pearl'] });
+    const ids =
+      'collectedPearlIds' in collected
+        ? collected.collectedPearlIds
+        : undefined;
+    if (!Array.isArray(ids)) throw new Error('Missing pearl identity array.');
+    expect(Object.isFrozen(ids)).toBe(true);
+    expect(ids).not.toBe(h.runtimes[0].getSnapshot().collectedPearlIds);
+    expect(() => Object.assign(ids, { 0: 'not-a-real-pearl' })).toThrow();
+    expect(snapshot).toMatchObject({ collectedPearlIds: [] });
+    expect(hook.getSnapshot()).toMatchObject({ collectedPearlIds: ['pearl'] });
     await h.host.dispose();
     expect(window.__REEF_RUSH_TEST__).toBeUndefined();
     expect(h.host.getSnapshot().player).toBeNull();

@@ -25,7 +25,7 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it('loads original gltf Kelpworks without enabling course selection', async () => {
+  it('loads original gltf Kelpworks and makes it available to earned progression', async () => {
     await expect(loadCourseDefinition('kelpworks')).resolves.toMatchObject({
       courseId: 'kelpworks',
       name: COURSE_NAMES.kelpworks,
@@ -39,7 +39,7 @@ describe('explicit lazy course loading', () => {
       medalTimesMs: { gold: 24_000, silver: 36_000, bronze: 55_000 },
     });
     expect(COURSES.find((course) => course.id === 'kelpworks')?.available).toBe(
-      false,
+      true,
     );
   });
 

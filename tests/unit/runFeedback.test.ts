@@ -13,7 +13,7 @@ const result = {
 const checkpoint: RaceEvent = {
   type: 'checkpoint',
   checkpointId: 'gate',
-  checkpointIndex: 1,
+  checkpointIndex: 0,
   elapsedMs: 10,
   fraction: 0.5,
 };
@@ -25,6 +25,23 @@ const pearl: RaceEvent = {
 };
 
 describe('bounded run feedback', () => {
+  it.each([
+    [0, 'Checkpoint 1 cleared'],
+    [2, 'Checkpoint 3 cleared'],
+    [4, 'Checkpoint 5 cleared'],
+  ] as const)(
+    'presents zero-based checkpoint event %s using human numbering',
+    (checkpointIndex, text) => {
+      const feedback = createRunFeedback();
+      feedback.consume([], [{ ...checkpoint, checkpointIndex }], 0);
+      expect(feedback.getState(0)).toMatchObject({
+        cue: 'checkpoint',
+        text,
+        announcement: text,
+      });
+    },
+  );
+
   it('maps every authoritative event once, without duplicating trigger contacts', () => {
     const feedback = createRunFeedback();
     const fish: FishControllerEvent[] = [

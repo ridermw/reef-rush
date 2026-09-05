@@ -345,7 +345,7 @@ describe('App shell', () => {
     expect(screen.getByText('New time record')).toBeVisible();
     expect(screen.getByText('Run complete', { exact: true })).toBeVisible();
     expect(screen.getByText(/progress known at the finish/i)).toBeVisible();
-    expect(screen.getByText(/Kelpworks.*not yet available/i)).toBeVisible();
+    expect(screen.getByText('Kelpworks: unlocked')).toBeVisible();
     expect(screen.getByText('0:21.94')).toBeVisible();
     expect(screen.getByText(/4 \/ 4 pearls/)).toBeVisible();
     await user.click(
@@ -354,7 +354,10 @@ describe('App shell', () => {
     expect(
       screen.getByRole('heading', { name: 'Choose a course' }),
     ).toBeVisible();
-    expect(screen.getByRole('button', { name: /Kelpworks/ })).toBeDisabled();
+    // A finish-only shell dispatch does not publish the host's earned progress.
+    expect(
+      screen.getByRole('button', { name: 'Locked: Kelpworks' }),
+    ).toBeDisabled();
   });
 
   it('announces meaningful race feedback politely without a second status role or contact live flood', () => {
@@ -527,31 +530,76 @@ describe('App shell', () => {
     expectGameRoot('absent');
   });
 
-  it('keeps unimplemented content disabled even when progression unlocks it', () => {
-    const store = createAppStore();
-    store.dispatch({
-      type: 'PROGRESS_UPDATED',
-      progress: {
-        version: 1,
-        courses: {
-          'sunlit-shoals': {
-            bestElapsedMs: 10,
-            bestMedal: 'gold',
-            bestPearlCount: 4,
+  it.each(['bronze', 'silver', 'gold'] as const)(
+    'enables Kelpworks after a Sunlit %s while keeping Blacksmoker unavailable',
+    (medal) => {
+      const store = createAppStore();
+      store.dispatch({
+        type: 'PROGRESS_UPDATED',
+        progress: {
+          version: 1,
+          courses: {
+            'sunlit-shoals': {
+              bestElapsedMs: 10,
+              bestMedal: medal,
+              bestPearlCount: 4,
+            },
+            kelpworks: {
+              bestElapsedMs: 20_000,
+              bestMedal: 'gold',
+              bestPearlCount: 5,
+            },
           },
         },
-      },
-      notice: null,
-    });
-    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
-    render(<App store={store} />);
-    expect(screen.getByRole('button', { name: /Kelpworks/ })).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: /Blacksmoker Run/ }),
-    ).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Sunlit Shoals/ })).toBeEnabled();
-    expect(screen.getAllByText(/not yet available/i)).toHaveLength(2);
-  });
+        notice: null,
+      });
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      render(<App store={store} />);
+      expect(
+        screen.getByRole('button', { name: 'Load Kelpworks' }),
+      ).toBeEnabled();
+      expect(
+        screen.getByRole('button', { name: /Blacksmoker Run/ }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /Sunlit Shoals/ }),
+      ).toBeEnabled();
+      expect(screen.getAllByText(/not yet available/i)).toHaveLength(1);
+    },
+  );
+
+  it.each([false, true])(
+    'keeps available Kelpworks locked without a qualifying Sunlit medal (record: %s)',
+    (hasRecord) => {
+      const store = createAppStore();
+      store.dispatch({
+        type: 'PROGRESS_UPDATED',
+        progress: {
+          version: 1,
+          courses: hasRecord
+            ? {
+                'sunlit-shoals': {
+                  bestElapsedMs: 31_000,
+                  bestMedal: null,
+                  bestPearlCount: 4,
+                },
+              }
+            : {},
+        },
+        notice: null,
+      });
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      render(<App store={store} />);
+      expect(
+        screen.getByRole('button', { name: 'Locked: Kelpworks' }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', {
+          name: 'Blacksmoker Run - not yet available',
+        }),
+      ).toBeDisabled();
+    },
+  );
 
   it('shows accurate controls rather than shell and unimplemented restart promises', () => {
     render(<App store={createAppStore()} />);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Vector3 } from '../../src/game/course/courseDefinition';
 import {
+  checkpointFraction,
   movementSegment,
   pickupFraction,
   pickupIntersection,
@@ -10,6 +11,33 @@ import {
   scaleIntersection,
   type RaceIntersection,
 } from '../../src/game/race/raceIntersection';
+
+describe('checkpoint crossing observations', () => {
+  it('accepts a crossing even when the later endpoint leaves the aperture', () => {
+    const checkpoint = {
+      id: 'near-edge',
+      position: [6, -6, 72],
+      direction: [0, 0, 1],
+      radius: 3.5,
+    } as const;
+    const segment = movementSegment([9.49, -6, 71.99], [9.51, -6, 72.03]);
+    const crossing = checkpointFraction(segment, checkpoint);
+    expect(crossing).not.toBeNull();
+    if (!crossing) throw new Error('Expected the actual segment crossing.');
+    const fraction = scaleIntersection(crossing, 1);
+    expect(fraction).toBeGreaterThan(0);
+    expect(fraction).toBeLessThan(1);
+    expect(
+      segment.from[0] + segment.delta[0] * fraction - checkpoint.position[0],
+    ).toBeLessThan(checkpoint.radius);
+    expect(
+      Math.hypot(
+        segment.to[0] - checkpoint.position[0],
+        segment.to[1] - checkpoint.position[1],
+      ),
+    ).toBeGreaterThan(checkpoint.radius);
+  });
+});
 
 describe('retained intersection scaling and ordering', () => {
   it.each([
