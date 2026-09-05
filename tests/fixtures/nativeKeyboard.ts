@@ -37,6 +37,20 @@ export async function setNativeKeys<Key extends string>(
   );
 }
 
+export async function pulseNativeKey<Key extends string>(
+  keyboard: Pick<Page['keyboard'], 'press'>,
+  held: Set<Key>,
+  key: Key,
+) {
+  if (!['a', 'd', 'ArrowUp', 'ArrowDown'].includes(key))
+    throw new Error('Native pulse requires one steering key.');
+  if (held.has(key)) throw new Error('Native pulse key is already held.');
+  // Rejected acknowledgements can follow delivery; cleanup still owns the key.
+  held.add(key);
+  await keyboard.press(key, { delay: 100 });
+  held.delete(key);
+}
+
 export async function releaseNativeKeys<Key extends string>(
   keyboard: Pick<Page['keyboard'], 'down' | 'up'>,
   held: Set<Key>,
