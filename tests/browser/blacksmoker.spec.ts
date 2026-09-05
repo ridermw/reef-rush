@@ -218,7 +218,7 @@ test('actual earned Sunlit and Kelpworks unlock lazy Blacksmoker, six native pea
     evidence.stage = 'earned Sunlit';
     await loadSunlit(page);
     await expectHealthyAudio();
-    evidence.sunlit = await driveSunlit(page);
+    evidence.sunlit = await driveSunlit(page, testInfo);
     expect(evidence.sunlit.medal).not.toBeNull();
     let progress = updateProgress(emptyProgress(), evidence.sunlit);
     await expect.poll(() => stored(page, progressKey)).toEqual(progress);

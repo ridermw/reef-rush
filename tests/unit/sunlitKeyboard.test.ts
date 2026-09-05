@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from '../../src/settings/settings';
 import { driveSunlit } from '../browser/acceptance-helpers';
 import type { KeyboardObservation } from '../fixtures/courseKeyboardPolicy';
 import { deferred } from '../fixtures/originalAssets';
+import * as nativeRecording from '../fixtures/nativeInputRecording';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -83,6 +84,21 @@ function nativePage(
   };
   return page as Page;
 }
+
+it('enrolls explicit timing capture before reading or driving the course', async () => {
+  const failure = new Error('Recording enrollment observed.');
+  const record = vi
+    .spyOn(nativeRecording, 'recordNativeInput')
+    .mockRejectedValue(failure);
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockRejectedValue(new Error('Unenrolled observation.'));
+  const page = nativePage(evaluate, vi.fn(), vi.fn());
+  const sink = { attach: vi.fn() };
+  await expect(driveSunlit(page, sink)).rejects.toBe(failure);
+  expect(record).toHaveBeenCalledWith(page, sink, expect.any(Function));
+  expect(evaluate).not.toHaveBeenCalled();
+});
 
 it('releases pitch instead of commanding an upward overshoot after the recorded native observation gap', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});

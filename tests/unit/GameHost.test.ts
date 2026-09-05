@@ -3507,7 +3507,7 @@ describe('terminal progress and diagnostics', () => {
     await h.load();
     expect(window.__REEF_RUSH_TEST__).toBeDefined();
     const hook = window.__REEF_RUSH_TEST__!;
-    expect(Object.keys(hook)).toEqual(['getSnapshot']);
+    expect(Object.keys(hook)).toEqual(['getSnapshot', 'getInputStamp']);
     const snapshot = hook.getSnapshot();
     expect(snapshot.player).not.toBeNull();
     expect(Object.isFrozen(snapshot)).toBe(true);
@@ -3534,6 +3534,83 @@ describe('terminal progress and diagnostics', () => {
     await h.host.dispose();
     expect(window.__REEF_RUSH_TEST__).toBeUndefined();
     expect(h.host.getSnapshot().player).toBeNull();
+  });
+
+  it('exposes immutable live input stamps without snapshot or diagnostics reads', async () => {
+    vi.stubEnv('VITE_TEST_HOOKS', 'true');
+    const h = await setup();
+    await h.load();
+    const hook = window.__REEF_RUSH_TEST__!;
+    expect(hook).toHaveProperty('getInputStamp', expect.any(Function));
+    const observed = h.host.getSnapshot();
+    const snapshotRead = vi.spyOn(h.host, 'getSnapshot');
+    const diagnosticsRead = vi.spyOn(h.host, 'getDiagnostics');
+    const stamp = hook.getInputStamp();
+    expect(stamp).toEqual({
+      screen: observed.screen,
+      steps: observed.frame.steps,
+      rendered: observed.frame.rendered,
+      settingsOpen: false,
+      graphicsLost: false,
+      inputResets: 1,
+    });
+    expect(Object.isFrozen(stamp)).toBe(true);
+    expect(() => Object.assign(stamp, { steps: -1 })).toThrow();
+    expect(snapshotRead).not.toHaveBeenCalled();
+    expect(diagnosticsRead).not.toHaveBeenCalled();
+    h.frame(100);
+    const current = hook.getInputStamp();
+    expect(current.steps).toBeGreaterThan(stamp.steps);
+    expect(current.rendered).toBeGreaterThan(stamp.rendered);
+    expect(stamp.steps).toBe(observed.frame.steps);
+  });
+
+  it('input stamps retain settings and pause reset history between observations', async () => {
+    vi.stubEnv('VITE_TEST_HOOKS', 'true');
+    const h = await setup();
+    await h.load();
+    const hook = window.__REEF_RUSH_TEST__!;
+    expect(hook).toHaveProperty('getInputStamp', expect.any(Function));
+    const initial = hook.getInputStamp();
+    h.host.setSettingsOpen(true);
+    expect(hook.getInputStamp()).toMatchObject({
+      settingsOpen: true,
+      inputResets: initial.inputResets + 1,
+    });
+    h.host.setSettingsOpen(false);
+    h.store.dispatch({ type: 'PAUSE' });
+    h.store.dispatch({ type: 'RESUME' });
+    expect(hook.getInputStamp()).toMatchObject({
+      screen: 'playing',
+      settingsOpen: false,
+      inputResets: initial.inputResets + 4,
+    });
+    h.renderer.domElement.dispatchEvent(
+      new Event('webglcontextlost', { cancelable: true }),
+    );
+    expect(hook.getInputStamp()).toMatchObject({ graphicsLost: true });
+    expect(initial).toMatchObject({
+      settingsOpen: false,
+      graphicsLost: false,
+      inputResets: 1,
+    });
+  });
+
+  it('input stamps record exactly one ordinary terminal clear', async () => {
+    vi.stubEnv('VITE_TEST_HOOKS', 'true');
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+    });
+    await h.load();
+    const hook = window.__REEF_RUSH_TEST__!;
+    expect(hook).toHaveProperty('getInputStamp', expect.any(Function));
+    const initial = hook.getInputStamp();
+    key('KeyW');
+    h.frame(100);
+    expect(hook.getInputStamp()).toMatchObject({
+      screen: 'results',
+      inputResets: initial.inputResets + 1,
+    });
   });
 
   it('does not expose the diagnostic global without the build flag', async () => {

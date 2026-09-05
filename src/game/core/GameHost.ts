@@ -228,6 +228,7 @@ export class GameHost {
   private lastHudTime = 0;
   private rendered = 0;
   private steps = 0;
+  private inputResets = 0;
   private profiled = 0;
   private hasSize = false;
   private renderQuality: RenderQuality;
@@ -280,13 +281,25 @@ export class GameHost {
     this.unsubscribe = store.subscribe(this.onStoreChange);
     window.addEventListener('pagehide', this.onPageHide);
     if (import.meta.env.VITE_TEST_HOOKS === 'true') {
-      this.removeHook = exposeGameHost(() => this.getSnapshot());
+      this.removeHook = exposeGameHost(
+        () => this.getSnapshot(),
+        () =>
+          Object.freeze({
+            screen: this.store.getState().screen,
+            steps: this.steps,
+            rendered: this.rendered,
+            settingsOpen: this.settingsOpen,
+            graphicsLost: this.graphicsLost,
+            inputResets: this.inputResets,
+          }),
+      );
     }
   }
 
   readonly setSettingsOpen = (open: boolean): void => {
     this.settingsOpen = open;
     this.input?.clear();
+    if (import.meta.env.VITE_TEST_HOOKS === 'true') this.inputResets++;
   };
 
   /** Raw data is available only for explicit inspection, never diagnostics. */
@@ -962,6 +975,7 @@ export class GameHost {
     this.runner.reset();
     this.lastTime = this.now();
     this.input?.clear();
+    if (import.meta.env.VITE_TEST_HOOKS === 'true') this.inputResets++;
   }
 
   private scheduleFrame(): void {

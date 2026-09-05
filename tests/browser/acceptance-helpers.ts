@@ -1,4 +1,9 @@
-import { expect, type Page } from '@playwright/test';
+import {
+  expect,
+  type JSHandle,
+  type Page,
+  type TestInfo,
+} from '@playwright/test';
 import sunlit from '../../src/content/courses/sunlitShoals';
 import type { HostSnapshot } from '../../src/game/core/GameHost';
 import {
@@ -11,15 +16,22 @@ import {
   type KeyboardObservation,
 } from '../fixtures/courseKeyboardPolicy';
 import { releaseNativeKeys, setNativeKeys } from '../fixtures/nativeKeyboard';
+import type { NativeInputRecorder } from '../fixtures/nativeInputRecorder';
+import { recordNativeInput } from '../fixtures/nativeInputRecording';
 
 export const progressKey = 'reef-rush.progress';
 
-export async function snapshot(page: Page): Promise<HostSnapshot> {
-  return page.evaluate(() => {
+export async function snapshot(
+  page: Page,
+  recorder?: JSHandle<NativeInputRecorder>,
+): Promise<HostSnapshot> {
+  return page.evaluate((recording) => {
     const hook = window.__REEF_RUSH_TEST__;
     if (!hook) throw new Error('Read-only acceptance diagnostics are missing.');
-    return hook.getSnapshot();
-  });
+    const state = hook.getSnapshot();
+    recording?.observe(state);
+    return state;
+  }, recorder);
 }
 
 export async function screen(page: Page, value: HostSnapshot['screen']) {
@@ -137,7 +149,18 @@ export async function expectIdle(page: Page) {
 
 // Authored CP/pearl route from the real SceneRuntime and GameHost traversals.
 // All control goes through Playwright's native keyboard; snapshots are read-only.
-export async function driveSunlit(page: Page) {
+export async function driveSunlit(
+  page: Page,
+  recording?: Pick<TestInfo, 'attach'>,
+) {
+  return recording
+    ? recordNativeInput(page, recording, (recorder) =>
+        runSunlit(page, recorder),
+      )
+    : runSunlit(page);
+}
+
+async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
   const held = new Set<string>();
   const checkpoints: number[] = [];
   const pearls: number[] = [];
@@ -149,7 +172,7 @@ export async function driveSunlit(page: Page) {
   let nextRecoveryLog = 0;
   let previous: KeyboardObservation | undefined;
   let failure: { error: unknown } | undefined;
-  let state = await snapshot(page);
+  let state = await snapshot(page, recorder);
   const deadline = Date.now() + 120_000;
   try {
     while (state.screen === 'playing' && Date.now() < deadline) {
@@ -209,12 +232,13 @@ export async function driveSunlit(page: Page) {
       const keys = new Set<string>(decision.keys);
       await setNativeKeys(page.keyboard, held, keys);
       const observed = await page.evaluate(
-        (previous) =>
+        ({ previous, recorder }) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
             (resolve) => {
               const observe = () => {
                 const next = window.__REEF_RUSH_TEST__!.getSnapshot();
                 if (next.screen !== 'playing' || next.frame.steps > previous) {
+                  recorder?.observe(next);
                   resolve({
                     state: next,
                     hud: [...document.querySelectorAll('.hud-card strong')].map(
@@ -226,7 +250,7 @@ export async function driveSunlit(page: Page) {
               requestAnimationFrame(observe);
             },
           ),
-        state.frame.steps,
+        { previous: state.frame.steps, recorder },
       );
       state = observed.state;
       if (state.race) {
