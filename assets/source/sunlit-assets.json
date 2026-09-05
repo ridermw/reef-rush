@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "seed": 9042026,
+  "palette": {
+    "sunfin-orange": "#e87928",
+    "sunfin-cream": "#fff0cb",
+    "sunfin-teal": "#208d8b",
+    "eye-ink": "#142934",
+    "limestone": "#d8c69e",
+    "coral-peach": "#e99982",
+    "coral-lavender": "#a397c8",
+    "seagrass-jade": "#429b7c"
+  },
+  "solids": [
+    {
+      "id": "sand-bed",
+      "type": "box",
+      "position": [0, -10, 45],
+      "rotation": [0, 0, 0, 1],
+      "halfExtents": [22, 2, 60],
+      "collision": "environment",
+      "color": "#e4d2a2"
+    },
+    {
+      "id": "west-ledge",
+      "type": "box",
+      "position": [-13, -6, 24],
+      "rotation": [0, 0, 0, 1],
+      "halfExtents": [3, 2, 14],
+      "collision": "environment",
+      "color": "#ccbd91"
+    },
+    {
+      "id": "coral-mound-east",
+      "type": "sphere",
+      "position": [13, -7, 38],
+      "radius": 4,
+      "collision": "environment",
+      "color": "#d58270"
+    },
+    {
+      "id": "coral-mound-west",
+      "type": "sphere",
+      "position": [-12, -7, 70],
+      "radius": 3,
+      "collision": "environment",
+      "color": "#bd827f"
+    },
+    {
+      "id": "urchin-outcrop",
+      "type": "sphere",
+      "position": [8, -6, 75],
+      "radius": 1.2,
+      "collision": "hazard",
+      "color": "#665d88"
+    }
+  ],
+  "reefClusters": [
+    [-17, -8, 2],
+    [15, -8, 8],
+    [-17, -4, 17],
+    [-16, -4, 31],
+    [16, -8, 29],
+    [17, -8, 45],
+    [-17, -8, 47],
+    [15, -8, 59],
+    [-17, -8, 64],
+    [-17, -8, 78],
+    [15, -8, 87],
+    [-15, -8, 99]
+  ]
+}
