@@ -1,11 +1,7 @@
-import {
-  useEffect,
-  useRef,
-  useSyncExternalStore,
-  type KeyboardEvent,
-} from 'react';
+import { useSyncExternalStore } from 'react';
 import type { SettingsStore } from '../../settings/SettingsStore';
 import { AudioNotice, type ShellAudio } from './AudioNotice';
+import { NativeDialog } from './NativeDialog';
 
 interface SettingsDialogProps {
   store: SettingsStore;
@@ -20,71 +16,23 @@ export function SettingsDialog({
   onModalChange,
   audio,
 }: SettingsDialogProps) {
-  const ref = useRef<HTMLDialogElement>(null);
   const snapshot = useSyncExternalStore(
     store.subscribe,
     store.getState,
     store.getState,
   );
   const settings = snapshot.settings;
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) throw new Error('Settings dialog is not mounted.');
-    const opener = document.activeElement;
-    onModalChange?.(true);
-    dialog.showModal();
-    dialog.focus({ preventScroll: true });
-    return () => {
-      dialog.close();
-      onModalChange?.(false);
-      if (opener instanceof HTMLElement && opener.isConnected)
-        opener.focus({ preventScroll: true });
-    };
-  }, [onModalChange]);
-
-  function ownKeyboard(event: KeyboardEvent<HTMLDialogElement>) {
-    event.stopPropagation();
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onClose();
-    } else if (event.key === 'Tab') {
-      const controls = Array.from(
-        event.currentTarget.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), [href], select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-      const first = controls[0];
-      const last = controls.at(-1);
-      const focus = document.activeElement;
-      if (
-        event.shiftKey
-          ? focus === first || focus === event.currentTarget
-          : focus === last || focus === event.currentTarget
-      ) {
-        event.preventDefault();
-        (event.shiftKey ? last : first)?.focus();
-      }
-    }
-  }
-
   function changeAudio(patch: unknown) {
     store.update(patch);
     void audio?.unlockAudio();
   }
 
   return (
-    <dialog
-      ref={ref}
-      className="settings-dialog"
-      aria-labelledby="settings-heading"
-      aria-describedby="settings-description"
-      tabIndex={-1}
-      onKeyDown={ownKeyboard}
-      onKeyUp={(event) => event.stopPropagation()}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
+    <NativeDialog
+      labelledBy="settings-heading"
+      describedBy="settings-description"
+      onClose={onClose}
+      onModalChange={onModalChange}
     >
       <header className="settings-header">
         <div>
@@ -208,6 +156,6 @@ export function SettingsDialog({
         </p>
       )}
       {audio && <AudioNotice host={audio} />}
-    </dialog>
+    </NativeDialog>
   );
 }

@@ -103,3 +103,67 @@ export function saveProgress(
     throw new Error('Failed to save progress.', { cause });
   }
 }
+
+export type ProgressReplacement =
+  | {
+      readonly status:
+        | 'replaced'
+        | 'changed'
+        | 'loaded'
+        | 'empty'
+        | 'unsupported-version'
+        | 'cancelled';
+    }
+  | {
+      readonly status: 'invalid-request' | 'unavailable' | 'write-failed';
+      readonly cause: unknown;
+    };
+
+/** Explicit authorization is scoped to one exact, replaceable raw snapshot. */
+export function replaceInvalidProgress(
+  expectedRaw: unknown,
+  input: unknown,
+  provider: StorageProvider = browserStorage,
+  signal?: AbortSignal,
+): ProgressReplacement {
+  let progress: Progress;
+  try {
+    if (typeof expectedRaw !== 'string')
+      throw new TypeError('Recovery requires the inspected raw save.');
+    if (signal !== undefined && !(signal instanceof AbortSignal))
+      throw new TypeError('Recovery requires a valid cancellation signal.');
+    progress = parseProgress(input);
+  } catch (cause) {
+    return { status: 'invalid-request', cause };
+  }
+  if (signal?.aborted) return { status: 'cancelled' };
+  let storage: StorageLike;
+  try {
+    storage = provider();
+  } catch (cause) {
+    return { status: 'unavailable', cause };
+  }
+  const current = readProgress(() => storage);
+  if (current.status === 'unavailable') return current;
+  if (current.status !== 'invalid') return { status: current.status };
+  if (current.reason === 'unsupported-version')
+    return { status: 'unsupported-version' };
+  if (current.raw !== expectedRaw) return { status: 'changed' };
+  const serialized = JSON.stringify(progress);
+  if (signal?.aborted) return { status: 'cancelled' };
+  try {
+    storage.setItem(PROGRESS_STORAGE_KEY, serialized);
+  } catch (cause) {
+    return { status: 'write-failed', cause };
+  }
+  return { status: 'replaced' };
+}
+
+export function serializeProgressBackup(raw: string): string {
+  // JSON escapes lone UTF-16 surrogates before Blob's UTF-8 conversion.
+  return JSON.stringify({
+    format: 'reef-rush.progress-backup',
+    version: 1,
+    raw,
+  });
+}

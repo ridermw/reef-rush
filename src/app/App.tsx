@@ -5,7 +5,7 @@ import {
   type AppPresentation,
   type AppStore,
 } from './appStore';
-import { screenUsesGameRoot } from './screens';
+import { screenUsesGameRoot, type AppScreen } from './screens';
 import { CourseSelectScreen } from './components/CourseSelectScreen';
 import { ErrorScreen } from './components/ErrorScreen';
 import { GameHud } from './components/GameHud';
@@ -20,6 +20,7 @@ import {
   type SettingsStore,
 } from '../settings/SettingsStore';
 import { SettingsDialog } from './components/SettingsDialog';
+import { SavedProgressDialog } from './components/SavedProgressDialog';
 import { AudioNotice, type ShellAudio } from './components/AudioNotice';
 
 export interface AppProps {
@@ -27,7 +28,13 @@ export interface AppProps {
   settings?: SettingsStore;
   host?: Pick<
     GameHost,
-    'setContainer' | 'setSettingsOpen' | 'settings' | 'retryCourse'
+    | 'setContainer'
+    | 'setSettingsOpen'
+    | 'settings'
+    | 'retryCourse'
+    | 'inspectSavedProgress'
+    | 'replaceSavedProgress'
+    | 'retrySaving'
   > &
     ShellAudio;
 }
@@ -44,7 +51,9 @@ export function App({ store, host, settings }: AppProps) {
   const [preferences] = useState(
     () => settings ?? host?.settings ?? createSettingsStore(),
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modal, setModal] = useState<
+    { kind: 'settings' } | { kind: 'progress'; screen: AppScreen } | null
+  >(null);
   const preferencesState = useSyncExternalStore(
     preferences.subscribe,
     preferences.getState,
@@ -52,7 +61,7 @@ export function App({ store, host, settings }: AppProps) {
   );
   function openSettings() {
     host?.setSettingsOpen(true);
-    setSettingsOpen(true);
+    setModal({ kind: 'settings' });
   }
   function resume() {
     void host?.unlockAudio();
@@ -67,6 +76,9 @@ export function App({ store, host, settings }: AppProps) {
     store.getState,
     store.getState,
   );
+  if (modal?.kind === 'progress' && modal.screen !== state.screen) {
+    setModal(null);
+  }
   const courseName = state.selectedCourseId
     ? COURSE_NAMES[state.selectedCourseId]
     : null;
@@ -177,29 +189,47 @@ export function App({ store, host, settings }: AppProps) {
         );
     }
   })();
-  const settingsContent = settingsOpen ? (
-    <SettingsDialog
-      store={preferences}
-      audio={host}
-      onModalChange={host?.setSettingsOpen}
-      onClose={() => setSettingsOpen(false)}
-    />
-  ) : null;
+  const stationary = state.screen !== 'playing' && state.screen !== 'loading';
+  const modalContent =
+    modal?.kind === 'settings' ? (
+      <SettingsDialog
+        store={preferences}
+        audio={host}
+        onModalChange={host?.setSettingsOpen}
+        onClose={() => setModal(null)}
+      />
+    ) : modal?.kind === 'progress' && host && stationary ? (
+      <SavedProgressDialog host={host} onClose={() => setModal(null)} />
+    ) : null;
   const notices = (
     <>
       {progressNotice}
+      {host && stationary && (
+        <div className="saved-progress-entry">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              host.setSettingsOpen(true);
+              setModal({ kind: 'progress', screen: state.screen });
+            }}
+          >
+            Saved progress
+          </button>
+        </div>
+      )}
       {state.graphicsLost && (
         <p className="service-notice" role="status">
           Graphics interrupted. Waiting for graphics to be restored; your run
           and saved progress are retained. Restoration will not resume play.
         </p>
       )}
-      {!settingsOpen && preferencesState.notice && (
+      {!modal && preferencesState.notice && (
         <p className="service-notice" role="alert">
           {preferencesState.notice}
         </p>
       )}
-      {!settingsOpen && host && <AudioNotice host={host} />}
+      {!modal && host && <AudioNotice host={host} />}
     </>
   );
 
@@ -233,7 +263,7 @@ export function App({ store, host, settings }: AppProps) {
             </div>
             {notices}
           </div>
-          {settingsContent}
+          {modalContent}
         </div>
       </div>
     );
@@ -246,7 +276,7 @@ export function App({ store, host, settings }: AppProps) {
     >
       {content}
       {notices}
-      {settingsContent}
+      {modalContent}
     </div>
   );
 }

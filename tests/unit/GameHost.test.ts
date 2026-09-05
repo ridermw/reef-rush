@@ -19,6 +19,7 @@ import {
   type StorageLike,
 } from '../../src/game/save/progressStorage';
 import {
+  emptyProgress,
   parseProgress,
   unlockedCourseIds,
 } from '../../src/game/progression/progress';
@@ -1488,6 +1489,275 @@ describe('coordinated monotonic persistence through real finishes', () => {
     expect(h.store.getState().screen).toBe('results');
     expect(h.store.getState().result).toMatchObject({ medal: 'gold' });
   }
+
+  it('inspects storage freshly without putting raw data in diagnostics', async () => {
+    const m = memory();
+    const h = await setup({ storage: m.provider });
+    m.state.raw = '{private';
+    expect(h.host.inspectSavedProgress?.()).toMatchObject({
+      status: 'invalid',
+      raw: '{private',
+      reason: 'malformed-json',
+    });
+    expect(JSON.stringify(h.host.getSnapshot())).not.toContain('{private');
+    m.state.raw = null;
+    expect(h.host.inspectSavedProgress?.()).toMatchObject({ status: 'empty' });
+  });
+
+  it.each(
+    [
+      ['malformed-json', '{private-record'],
+      ['invalid-schema', '{"version":1,"private-record":true}'],
+      ['unsupported-version', '{"version":99,"private-record":true}'],
+    ].flatMap(([reason, raw]) =>
+      [false, true].map((duringWriteGuard) => ({
+        reason,
+        raw,
+        duringWriteGuard,
+      })),
+    ),
+  )(
+    'keeps $reason raw data out of ordinary retry results (write guard: $duringWriteGuard)',
+    async ({ reason, raw, duringWriteGuard }) => {
+      const m = memory();
+      const h = await setup({ storage: m.provider });
+      m.state.raw = raw;
+      if (duringWriteGuard) {
+        vi.mocked(m.storage.getItem).mockReturnValueOnce(
+          JSON.stringify(emptyProgress()),
+        );
+      }
+      const result = await h.host.retrySaving();
+      expect(result.status).toBe('failed');
+      if (result.status === 'failed') {
+        expect(result.cause).toBeInstanceOf(Error);
+        expect(result.cause).not.toHaveProperty('cause');
+        expect(String(result.cause)).toMatch(/invalid.*save/i);
+        expect(String(result.cause)).not.toContain('private-record');
+        if (!duringWriteGuard) expect(String(result.cause)).toContain(reason);
+      }
+      expect(m.storage.setItem).not.toHaveBeenCalled();
+      expect(m.state.raw).toBe(raw);
+      expect(JSON.stringify(h.host.getSnapshot())).not.toContain(
+        'private-record',
+      );
+      expect(h.host.inspectSavedProgress()).toMatchObject({ raw, reason });
+    },
+  );
+
+  it('queues recovery behind ordinary saves and captures a finish earned while waiting inside the lock', async () => {
+    const m = memory();
+    m.state.raw = '{broken';
+    const gate = deferred<void>();
+    const entered = deferred<void>();
+    let requests = 0;
+    const h = await setup({
+      storage: m.provider,
+      loadCourse: finishCourse,
+      coordinateProgress: async (save) => {
+        requests++;
+        entered.resolve();
+        await gate.promise;
+        save();
+      },
+    });
+    await h.load();
+    expect(h.host.replaceSavedProgress).toBeTypeOf('function');
+    const pending = h.host.replaceSavedProgress(
+      '{broken',
+      new AbortController().signal,
+    );
+    try {
+      await entered.promise;
+      finish(h);
+      expect(requests).toBe(1);
+      expect(m.storage.setItem).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+    }
+    expect(await pending).toEqual({ status: 'replaced' });
+    await h.host.whenIdle();
+    expect(m.read()).toEqual(h.store.getState().progress);
+    expect(m.read().courses['sunlit-shoals']?.bestMedal).toBe('gold');
+    expect(h.store.getState().progressNotice).toBeNull();
+    expect(requests).toBe(2);
+  });
+
+  it.each(['changed', 'loaded', 'empty', 'unsupported-version'] as const)(
+    'aborts a queued replacement if storage becomes %s, then can retry ordinary merging',
+    async (status) => {
+      const m = memory();
+      m.state.raw = '{broken';
+      const gate = deferred<void>();
+      const entered = deferred<void>();
+      const h = await setup({
+        loadCourse: finishCourse,
+        storage: m.provider,
+        coordinateProgress: async (save) => {
+          entered.resolve();
+          await gate.promise;
+          save();
+        },
+      });
+      await h.load();
+      expect(h.host.replaceSavedProgress).toBeTypeOf('function');
+      finish(h);
+      const pending = h.host.replaceSavedProgress(
+        '{broken',
+        new AbortController().signal,
+      );
+      try {
+        await entered.promise;
+        m.state.raw = {
+          changed: '{different',
+          loaded: JSON.stringify(latest),
+          empty: null,
+          'unsupported-version': '{"version":99,"keep":true}',
+        }[status];
+      } finally {
+        gate.resolve();
+      }
+      const result = await pending;
+      // The ordinary save ahead of recovery may turn empty storage into valid storage.
+      expect(result).toEqual({
+        status: status === 'empty' ? 'loaded' : status,
+      });
+      if (status === 'changed' || status === 'unsupported-version')
+        expect(m.storage.setItem).not.toHaveBeenCalled();
+      if (status === 'loaded') expect(m.read()).toEqual(expected);
+      expect(h.store.getState().progressNotice).toMatch(/not replaced/i);
+      m.state.raw = JSON.stringify(latest);
+      expect(await h.host.retrySaving()).toEqual({ status: 'saved' });
+      expect(m.read()).toEqual(expected);
+      expect(h.store.getState().progressNotice).toBeNull();
+    },
+  );
+
+  it.each(['before-queue', 'waiting-lock', 'behind-save'] as const)(
+    'cancels uncommitted recovery %s without poisoning later ordinary saves',
+    async (when) => {
+      const m = memory();
+      m.state.raw = '{broken';
+      const gate = deferred<void>();
+      const entered = deferred<void>();
+      const request = new AbortController();
+      const h = await setup({
+        storage: m.provider,
+        loadCourse: finishCourse,
+        coordinateProgress: async (save) => {
+          entered.resolve();
+          await gate.promise;
+          save();
+        },
+      });
+      await h.load();
+      expect(h.host.replaceSavedProgress).toBeTypeOf('function');
+      if (when === 'before-queue') request.abort();
+      if (when === 'behind-save') finish(h);
+      const pending = h.host.replaceSavedProgress('{broken', request.signal);
+      try {
+        if (when !== 'before-queue') await entered.promise;
+        request.abort();
+      } finally {
+        gate.resolve();
+      }
+      expect(await pending).toEqual({ status: 'cancelled' });
+      expect(m.state.raw).toBe('{broken');
+      expect(m.storage.setItem).not.toHaveBeenCalled();
+      m.state.raw = JSON.stringify(latest);
+      expect(await h.host.retrySaving()).toEqual({ status: 'saved' });
+      await expect(h.host.whenIdle()).resolves.toBeUndefined();
+      expect(m.read().courses.kelpworks).toEqual(latest.courses.kelpworks);
+    },
+  );
+
+  it.each(['abort', 'abort-and-reject'] as const)(
+    'never reports a committed replacement as cancelled after %s',
+    async (afterCommit) => {
+      const m = memory();
+      m.state.raw = '{broken';
+      const request = new AbortController();
+      const h = await setup({
+        storage: m.provider,
+        coordinateProgress: (save) =>
+          Promise.resolve().then(() => {
+            save();
+            request.abort();
+            if (afterCommit === 'abort-and-reject')
+              throw new Error('lock release failed');
+          }),
+      });
+      expect(
+        await h.host.replaceSavedProgress?.('{broken', request.signal),
+      ).toEqual({
+        status: 'replaced',
+      });
+      expect(m.read().courses).toEqual({});
+      if (afterCommit === 'abort-and-reject')
+        expect(h.store.getState().progressNotice).toMatch(
+          /saved.*coordination.*failed/i,
+        );
+    },
+  );
+
+  it.each(['write', 'lock', 'no-callback'] as const)(
+    'reports %s failure truthfully and permits a subsequent queued operation',
+    async (failure) => {
+      const m = memory();
+      m.state.raw = '{broken';
+      let fail = true;
+      const h = await setup({
+        storage: m.provider,
+        coordinateProgress: (save) =>
+          Promise.resolve().then(() => {
+            if (fail && failure === 'lock') throw new Error('lock denied');
+            if (fail && failure === 'no-callback') return;
+            save();
+          }),
+      });
+      m.state.writable = failure !== 'write';
+      const result = await h.host.replaceSavedProgress?.(
+        '{broken',
+        new AbortController().signal,
+      );
+      expect(result).toMatchObject({
+        status: failure === 'write' ? 'write-failed' : 'failed',
+      });
+      expect(result).toHaveProperty('cause');
+      expect(m.state.raw).toBe('{broken');
+      expect(h.store.getState().progressNotice).toMatch(/not replaced/i);
+      fail = false;
+      m.state.writable = true;
+      expect(
+        await h.host.replaceSavedProgress(
+          '{broken',
+          new AbortController().signal,
+        ),
+      ).toEqual({ status: 'replaced' });
+      await expect(h.host.whenIdle()).resolves.toBeUndefined();
+    },
+  );
+
+  it('reports ordinary retry failure instead of unconditional success, rejects bad recovery requests and disposed hosts', async () => {
+    const m = memory();
+    m.state.raw = '{broken';
+    const h = await setup({ storage: m.provider });
+    expect(await h.host.retrySaving?.()).toMatchObject({ status: 'failed' });
+    expect(
+      await h.host.replaceSavedProgress?.(null, new AbortController().signal),
+    ).toMatchObject({
+      status: 'invalid-request',
+    });
+    expect(m.storage.setItem).not.toHaveBeenCalled();
+    await h.host.dispose();
+    expect(
+      await h.host.replaceSavedProgress(
+        '{broken',
+        new AbortController().signal,
+      ),
+    ).toMatchObject({ status: 'failed' });
+    expect(await h.host.retrySaving()).toMatchObject({ status: 'failed' });
+  });
 
   it('reconciles newer stored records, cached history and the actual earned result', async () => {
     const prior = {

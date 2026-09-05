@@ -15,7 +15,10 @@ import type { FinishedRaceResult, RaceState } from '../race/raceTypes';
 import {
   PROGRESS_STORAGE_KEY,
   readProgress,
+  replaceInvalidProgress,
   saveProgress,
+  type ProgressRead,
+  type ProgressReplacement,
   type StorageProvider,
 } from '../save/progressStorage';
 import type {
@@ -78,8 +81,18 @@ export interface GameHostDependencies {
   ) => () => void;
   readonly storage?: StorageProvider;
   /** Run the synchronous transaction once under an exclusive cross-host lock. */
-  readonly coordinateProgress?: (save: () => void) => Promise<void>;
+  readonly coordinateProgress?: (
+    save: () => void,
+    signal?: AbortSignal,
+  ) => Promise<void>;
 }
+
+export type ProgressSaveResult =
+  | { readonly status: 'saved' }
+  | { readonly status: 'failed'; readonly cause: unknown };
+
+export type ProgressRecoveryResult =
+  ProgressReplacement | { readonly status: 'failed'; readonly cause: unknown };
 
 export interface HostSnapshot {
   readonly preferences: Settings;
@@ -118,14 +131,21 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function coordinateProgress(save: () => void): Promise<void> {
+async function coordinateProgress(
+  save: () => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
   if (typeof locks?.request !== 'function') {
     throw new Error(
       'Cannot persist safely: cross-tab save coordination is unavailable.',
     );
   }
-  await locks.request(PROGRESS_STORAGE_KEY, { mode: 'exclusive' }, save);
+  await locks.request(
+    PROGRESS_STORAGE_KEY,
+    signal ? { mode: 'exclusive', signal } : { mode: 'exclusive' },
+    save,
+  );
 }
 
 /** One long-lived owner per app store, independent of React's screen/remount lifetime. */
@@ -226,6 +246,85 @@ export class GameHost {
     this.settingsOpen = open;
     this.input?.clear();
   };
+
+  /** Raw data is available only for explicit inspection, never diagnostics. */
+  readonly inspectSavedProgress = (): ProgressRead =>
+    readProgress(this.deps.storage);
+
+  readonly retrySaving = (): Promise<ProgressSaveResult> => {
+    if (this.disposed) {
+      return Promise.resolve({
+        status: 'failed',
+        cause: new Error('This expedition has closed. Reload before saving.'),
+      });
+    }
+    const pending = this.saveTail.then(() => this.persistProgress());
+    this.saveTail = pending.then(() => {});
+    return pending;
+  };
+
+  readonly replaceSavedProgress = (
+    expectedRaw: unknown,
+    signal: AbortSignal,
+  ): Promise<ProgressRecoveryResult> => {
+    const pending = this.saveTail.then(() =>
+      this.recoverProgress(expectedRaw, signal),
+    );
+    this.saveTail = pending.then(() => {});
+    return pending;
+  };
+
+  private async recoverProgress(
+    expectedRaw: unknown,
+    signal: AbortSignal,
+  ): Promise<ProgressRecoveryResult> {
+    let outcome: ProgressRecoveryResult = {
+      status: 'failed',
+      cause: new Error('Save coordination did not run the recovery.'),
+    };
+    let committed = false;
+    let coordinationFailure: string | null = null;
+    try {
+      if (this.disposed) {
+        throw new Error('This expedition has closed. Reload before saving.');
+      }
+      if (typeof expectedRaw !== 'string' || !(signal instanceof AbortSignal)) {
+        outcome = {
+          status: 'invalid-request',
+          cause: new TypeError(
+            'Recovery requires an inspected save and cancellation signal.',
+          ),
+        };
+      } else if (signal.aborted) {
+        outcome = { status: 'cancelled' };
+      } else {
+        await (this.deps.coordinateProgress ?? coordinateProgress)(() => {
+          outcome = replaceInvalidProgress(
+            expectedRaw,
+            this.progress,
+            this.deps.storage,
+            signal,
+          );
+          committed = outcome.status === 'replaced';
+        }, signal);
+      }
+    } catch (cause) {
+      // A coordinator can fail after setItem committed. Closing cannot undo that write.
+      if (committed) {
+        coordinationFailure = `Progress saved; save coordination failed (${message(cause)}).`;
+      } else {
+        outcome =
+          signal instanceof AbortSignal && signal.aborted
+            ? { status: 'cancelled' }
+            : { status: 'failed', cause };
+      }
+    }
+    this.notice = committed
+      ? coordinationFailure
+      : `Session-only progress: save not replaced (${outcome.status}${'cause' in outcome ? `: ${message(outcome.cause)}` : ''}). Inspect the saved progress again before retrying.`;
+    this.publishProgress();
+    return outcome;
+  }
 
   /** Must be called directly in the trusted event, never from a render or effect. */
   readonly unlockAudio = (): Promise<AudioSnapshot> => this.audio.unlock();
@@ -861,22 +960,26 @@ export class GameHost {
     this.progress = updateProgress(this.progress, result);
     this.notice ??= 'Session-only progress: save pending.';
     // Earned progress belongs to the host, not the scene/navigation generation.
-    this.saveTail = this.saveTail.then(() => this.persistProgress());
+    this.saveTail = this.saveTail.then(async () => {
+      await this.persistProgress();
+    });
     this.publishProgress();
     this.store.dispatch({ type: 'RUN_FINISHED', result, achievements });
   }
 
-  private async persistProgress(): Promise<void> {
+  private async persistProgress(): Promise<ProgressSaveResult> {
+    let committed = false;
+    let outcome: ProgressSaveResult = {
+      status: 'failed',
+      cause: new Error('Save coordination did not run the save.'),
+    };
     try {
       await (this.deps.coordinateProgress ?? coordinateProgress)(() => {
         const storage = (this.deps.storage ?? (() => window.localStorage))();
         const current = readProgress(() => storage);
         if (current.status === 'invalid') {
           throw new Error(
-            'Invalid existing save preserved; refusing to overwrite it.',
-            {
-              cause: current,
-            },
+            `Invalid existing save preserved (${current.reason}); refusing to overwrite it.`,
           );
         }
         if (current.status === 'unavailable') {
@@ -887,12 +990,22 @@ export class GameHost {
         // Read the latest session records after acquiring the lock, with no awaits before writing.
         this.progress = mergeProgress(current.progress, this.progress);
         saveProgress(this.progress, () => storage);
+        committed = true;
         this.notice = null;
       });
+      if (committed) outcome = { status: 'saved' };
+      else throw outcome.cause;
     } catch (error) {
-      this.notice = `Session-only progress: could not save (${message(error)}).`;
+      outcome = committed
+        ? { status: 'saved' }
+        : // Writer error causes can contain raw storage; only inspection exposes it.
+          { status: 'failed', cause: new Error(message(error)) };
+      this.notice = committed
+        ? `Progress saved; save coordination failed (${message(error)}).`
+        : `Session-only progress: could not save (${message(error)}).`;
     }
     this.publishProgress();
+    return outcome;
   }
 
   private stopFrame(): void {
