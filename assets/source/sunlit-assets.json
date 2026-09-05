@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "courseId": "sunlit-shoals",
   "seed": 9042026,
   "palette": {
     "sunfin-orange": "#e87928",

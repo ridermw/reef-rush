@@ -5,6 +5,7 @@ export type StaticSolidSource = {
   readonly id: string;
   readonly position: Vector3Tuple;
   readonly collision: 'environment' | 'hazard';
+  readonly color: string;
 } & (
   | {
       readonly type: 'box';
@@ -54,7 +55,13 @@ export const ASSET_PATHS: readonly [
   'props/reef-kit.glb',
   'courses/sunlit-shoals.visual.glb',
   'courses/sunlit-shoals.collision.glb',
+  'courses/kelpworks.visual.glb',
+  'courses/kelpworks.collision.glb',
 ];
+export type CourseSourcePaths = Readonly<
+  Record<'sunlit-shoals' | 'kelpworks', string>
+>;
+export function courseSourcePaths(projectRoot: string): CourseSourcePaths;
 export function colliderContract(solid: StaticSolidSource): StaticSolidExtras;
 export function validateGlb(
   input: Uint8Array,
@@ -63,7 +70,7 @@ export function validateGlb(
 ): AssetReport;
 export function validateAssetSet(
   assetRoot: string,
-  sourceFile: string,
+  sourcePaths: CourseSourcePaths,
 ): Promise<AssetReport[]>;
 export function validateProject(
   projectRoot: string,

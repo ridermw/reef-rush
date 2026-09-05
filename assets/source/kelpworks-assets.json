@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "courseId": "kelpworks",
+  "seed": 9042026,
+  "palette": {
+    "kelp-dark-jade": "#244e3b",
+    "kelp-olive": "#61733d",
+    "kelp-golden": "#a99b4d"
+  },
+  "solids": [
+    {
+      "type": "box",
+      "id": "kelp-seabed",
+      "position": [0, -11, 74],
+      "halfExtents": [25, 2, 86],
+      "rotation": [0, 0, 0, 1],
+      "collision": "environment",
+      "color": "#586d45"
+    },
+    {
+      "type": "box",
+      "id": "kelp-west-bank",
+      "position": [-15, -6.5, 48],
+      "halfExtents": [3, 2.5, 24],
+      "rotation": [0, 0, 0, 1],
+      "collision": "environment",
+      "color": "#4d6240"
+    },
+    {
+      "type": "box",
+      "id": "kelp-east-bank",
+      "position": [15, -6.5, 100],
+      "halfExtents": [3, 2.5, 24],
+      "rotation": [0, 0, 0, 1],
+      "collision": "environment",
+      "color": "#4d6240"
+    },
+    {
+      "type": "sphere",
+      "id": "kelp-west-roots",
+      "position": [-14, -7, 30],
+      "radius": 2.5,
+      "collision": "environment",
+      "color": "#73834f"
+    },
+    {
+      "type": "sphere",
+      "id": "kelp-east-roots",
+      "position": [14, -7, 120],
+      "radius": 2.5,
+      "collision": "environment",
+      "color": "#73834f"
+    },
+    {
+      "type": "sphere",
+      "id": "kelp-urchin",
+      "position": [2, -7, 91],
+      "radius": 1,
+      "collision": "hazard",
+      "color": "#74516b"
+    },
+    {
+      "type": "sphere",
+      "id": "kelp-channel-rock",
+      "position": [12, -7, 80],
+      "radius": 2,
+      "collision": "environment",
+      "color": "#68766a"
+    }
+  ],
+  "kelpGroves": [
+    [-14, -9, 3],
+    [16, -9, 8],
+    [-19, -9, 13],
+    [13, -9, 18],
+    [-15, -4, 25],
+    [19, -9, 29],
+    [-15, -4, 35],
+    [14, -9, 39],
+    [-19, -9, 45],
+    [17, -9, 49],
+    [-15, -4, 55],
+    [13, -9, 59],
+    [-15, -4, 65],
+    [19, -9, 69],
+    [-18, -9, 75],
+    [15, -4, 79],
+    [-13, -9, 85],
+    [19, -9, 89],
+    [-17, -9, 95],
+    [15, -4, 99],
+    [-13, -9, 105],
+    [19, -9, 109],
+    [-18, -9, 115],
+    [15, -4, 119],
+    [-14, -9, 125],
+    [19, -9, 129],
+    [-19, -9, 135],
+    [14, -9, 139],
+    [-15, -9, 145],
+    [18, -9, 150]
+  ]
+}

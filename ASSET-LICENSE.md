@@ -35,6 +35,30 @@ No `.blend` archive is needed to edit or reproduce the artwork.
 Suggested attribution: **"Reef Rush original Sunlit assets, copyright (c) 2026
 Matthew W. Rider, CC BY 4.0; changes: [describe any changes]."**
 
+## Original Kelpworks assets (Task 11, Slice 11B)
+
+`assets/source/kelpworks-assets.json` and the same original Python generator
+author a separate marine kelp grove, not a coral reskin or imported model.
+Three shared, merged mesh variants combine closed tapered fronds, curved
+stipes and branching holdfast roots. Thirty grove instances use dark jade
+(`#244e3b`), olive (`#61733d`) and golden (`#a99b4d`) materials. Each variant
+has one primitive/material, preserving a flat mesh-only export scene rather
+than a hierarchy or one object per leaf. All fronds are static.
+
+| Output under `public/assets/`     | Original content                                                  |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `courses/kelpworks.visual.glb`    | Seven authored solid bases and thirty shared kelp grove instances |
+| `courses/kelpworks.collision.glb` | Only the seven named primitive proxy meshes; no kelp decoration   |
+
+Kelpworks reuses the unchanged `fish/sunfin.glb` lease and swim animation.
+Runtime reduced-effects controls still govern the fish and particles; the
+static kelp requires no animation or additional decoder. No external models,
+textures, fonts, skins, morph targets or downloaded artwork are incorporated.
+The JSON art data and generated GLBs are CC BY 4.0; the generator is MIT.
+
+Suggested attribution: **"Reef Rush original Kelpworks assets, copyright (c)
+2026 Matthew W. Rider, CC BY 4.0; changes: [describe any changes]."**
+
 ### Reproduction
 
 Use the repository's pinned Node version and Blender **4.5 LTS**. The initial
@@ -53,8 +77,13 @@ The executable defaults to `blender`, or the optional `BLENDER` environment
 variable. The output root contains the `fish`, `props` and `courses` directories.
 The runner always passes `--background --factory-startup --python-exit-code 1`
 before `--python`, propagates Blender failures and validates its outputs.
+It generates all six files. The original four exports retain their original
+Blender call order; Kelpworks materials and mesh datablocks are created only
+after those exports, preserving the reviewed Sunlit/fish/prop bytes.
 No UI, network, decoder or image resource is required. Tool installations and
 absolute machine paths do not belong in the repository.
+Unit tests and normal validation load the repository GLBs and do not require
+Blender. Only explicit asset generation requires the authoring tool.
 
 Geometry is constructed in game meters, **+Y up / +Z forward**, rotated into
 Blender's authoring basis as `(x, -z, y)`, then exported with glTF Y-up enabled.
@@ -70,10 +99,17 @@ same Blender build/platform, not promised across Blender updates or platforms.
 `tools/asset-profile.d.mts` supplies the typed `StaticSolidExtras`,
 `NoncollidingExtras`, `StaticSolidSource` and `AssetReport` contract. It has no
 runtime integration. `validateGlb(bytes, assetPath, liveSolids)` accepts the
-current typed Sunlit solids directly; `validateProject` also checks both
-project license files. The command uses the portable JSON source; the focused
-tests additionally compare that entire source solid array and both course
-outputs to the live `sunlitShoals.ts` definition, preventing silent source drift.
+selected course's typed solids, including their colors. An explicit six-path
+allowlist assigns fish, prop, visual or collision roles and course identity;
+unknown paths never receive a fallback profile. `validateAssetSet(assetRoot,
+sourcePaths)` requires an exact map with `sunlit-shoals` and `kelpworks` keys,
+each pointing to its own JSON source. `courseSourcePaths(projectRoot)` resolves
+those portable source filenames; `validateProject` also checks both project
+license files. Sources must declare version 1, seed `9042026`, their matching
+`courseId`, valid art data and the exact required solid identities/counts.
+The focused tests compare both complete source solid arrays and all four
+course outputs to their respective live definitions, preventing silent source
+drift or accidental cross-course matching.
 The runtime shares the pure `src/game/assets/staticSolidContract.mjs` checks
 and validates loaded objects in `validateLoadedCourseAsset.ts`; it does not
 import the filesystem based validator into the browser.
@@ -120,24 +156,30 @@ Its `node.extras.reefRush` value follows this versioned discriminated contract:
 The other primitive variant is `{ "type": "sphere", "radius": 4 }`; category is
 `"environment"` or `"hazard"`. Rotation is quaternion `[x, y, z, w]`.
 This metadata uses **game/glTF coordinates**, not Blender coordinates. Metadata
-must match the authored course exactly; exported float32 transforms, bounds
+must match the authored course exactly, including each primitive's material
+color; exported float32 transforms, bounds
 and primitive surfaces use an absolute `1e-5` tolerance. Local proxy meshes
 are centered at the origin with actual primitive dimensions; node translation
 and rotation place them in the course. The validator also checks closed proxy
 surfaces. Consumers should create primitive colliders from this metadata,
 **never detailed coral triangle physics**.
 
-The five IDs are `sand-bed`, `west-ledge`, `coral-mound-east`,
+The five Sunlit IDs are `sand-bed`, `west-ledge`, `coral-mound-east`,
 `coral-mound-west`, and `urchin-outcrop` (the sole static hazard).
-Each occurs exactly once in each course output. Dynamic gates, currents,
-checkpoints and pearls are intentionally absent.
+The seven Kelpworks IDs are `kelp-seabed`, `kelp-west-bank`, `kelp-east-bank`,
+`kelp-west-roots`, `kelp-east-roots`, `kelp-urchin` (the sole static hazard),
+and `kelp-channel-rock`. Each occurs exactly once in its own course's visual
+and collision outputs. Dynamic gates, currents, checkpoints and pearls are
+intentionally absent from all static exports.
 
 Decorative nodes instead have exactly
 `{ "version": 1, "role": "decoration", "collides": false }`;
 fish parts use the same form with `role: "fish-part"`. Course decoration names
 start with `decor-`. Decoration stays outside the open route/spawn ribbon
-(`-9 <= x <= 9`, above `y = -7.5`); low terraces stay below it. This is a static
-visibility/placement guard, not a gameplay or human art-quality assessment.
+(`-9 <= x <= 9`, above `y = -7.5`); low terraces stay below it. The static guard
+checks the entire transformed mesh bounds, not just the instance origin.
+Kelp grove origins lie at `13 <= abs(x) <= 19`, with fronds outside the ribbon.
+This is a visibility/placement guard, not a gameplay or human art-quality assessment.
 Named fish nodes include `sunfin-body`, `sunfin-eye-left`, `sunfin-eye-right`,
 `fin-tail`, `fin-dorsal`, `fin-anal`, `fin-pectoral-left` and
 `fin-pectoral-right`. The tail and both pectoral fins have nonconstant tracks

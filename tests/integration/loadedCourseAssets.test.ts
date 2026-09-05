@@ -2,12 +2,16 @@
 import { Group } from 'three';
 import { afterEach, expect, it } from 'vitest';
 import sunlit from '../../src/content/courses/sunlitShoals';
+import kelpworks from '../../src/content/courses/kelpworks';
+import type { CourseDefinition } from '../../src/game/course/courseDefinition';
 import {
   createAssetCache,
   type AssetLease,
 } from '../../src/game/assets/AssetCache';
 import {
   collisionAsset,
+  kelpCollisionAsset,
+  kelpVisualAsset,
   localAssetLoader,
   originalMetadata,
   visualAsset,
@@ -19,7 +23,7 @@ afterEach(() => {
   for (const lease of leases.splice(0)) lease.dispose();
 });
 
-async function setup(path = collisionAsset) {
+async function setup(path = collisionAsset, course: CourseDefinition = sunlit) {
   const cache = createAssetCache({ loader: localAssetLoader });
   const lease = await cache.acquire(path);
   leases.push(lease);
@@ -30,9 +34,11 @@ async function setup(path = collisionAsset) {
     validate: () =>
       validateLoadedCourseAsset(
         lease.root,
-        sunlit,
+        course,
         path,
-        path === collisionAsset ? 'collision' : 'visual',
+        path === collisionAsset || path === kelpCollisionAsset
+          ? 'collision'
+          : 'visual',
       ),
   };
 }
@@ -43,11 +49,67 @@ function mesh(root: Group, name = 'sand-bed') {
   return value;
 }
 
-it.each([collisionAsset, visualAsset])(
-  'accepts actual GLTFLoader committed %s bytes',
-  async (path) => {
-    const { validate } = await setup(path);
+it.each([
+  { path: collisionAsset, course: sunlit },
+  { path: visualAsset, course: sunlit },
+  { path: kelpCollisionAsset, course: kelpworks },
+  { path: kelpVisualAsset, course: kelpworks },
+])(
+  'accepts actual GLTFLoader committed $path bytes',
+  async ({ path, course }) => {
+    const { validate } = await setup(path, course);
     expect(validate).not.toThrow();
+  },
+);
+
+it.each([
+  { path: collisionAsset, course: kelpworks },
+  { path: visualAsset, course: kelpworks },
+  { path: kelpCollisionAsset, course: sunlit },
+  { path: kelpVisualAsset, course: sunlit },
+])(
+  'rejects actual $path bytes paired with the wrong course',
+  async ({ path, course }) => {
+    const { validate } = await setup(path, course);
+    expect(validate).toThrow(/solid/);
+  },
+);
+
+it.each([
+  'identity',
+  'missing',
+  'extra',
+  'decoration',
+  'surface',
+  'transform',
+] as const)(
+  'rejects Kelp collision %s after actual GLTFLoader parsing',
+  async (kind) => {
+    const { root, validate } = await setup(kelpCollisionAsset, kelpworks);
+    const solid = mesh(root, 'kelp-seabed');
+    if (kind === 'identity') originalMetadata(root).asset = collisionAsset;
+    if (kind === 'missing') solid.removeFromParent();
+    if (kind === 'extra') {
+      const extra = solid.clone();
+      extra.name = 'kelp-extra';
+      root.add(extra);
+    }
+    if (kind === 'decoration') {
+      const decor = solid.clone();
+      decor.name = 'decor-kelp-forbidden';
+      decor.userData.reefRush = {
+        version: 1,
+        role: 'decoration',
+        collides: false,
+      };
+      root.add(decor);
+    }
+    if (kind === 'surface')
+      mesh(root, 'kelp-west-roots')
+        .geometry.getAttribute('position')
+        .setXYZ(10, 0, 0, 0);
+    if (kind === 'transform') solid.position.x++;
+    expect(validate).toThrow();
   },
 );
 

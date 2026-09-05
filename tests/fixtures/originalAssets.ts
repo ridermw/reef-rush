@@ -8,6 +8,8 @@ import type { AssetLoader } from '../../src/game/assets/AssetCache';
 export const visualAsset = 'courses/sunlit-shoals.visual.glb';
 export const collisionAsset = 'courses/sunlit-shoals.collision.glb';
 export const fishAsset = 'fish/sunfin.glb';
+export const kelpVisualAsset = 'courses/kelpworks.visual.glb';
+export const kelpCollisionAsset = 'courses/kelpworks.collision.glb';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

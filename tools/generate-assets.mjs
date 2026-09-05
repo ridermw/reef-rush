@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { validateAssetSet } from './asset-profile.mjs';
+import { courseSourcePaths, validateAssetSet } from './asset-profile.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values } = parseArgs({
@@ -33,10 +33,7 @@ const result = spawnSync(
 if (result.error) throw result.error;
 if (result.status !== 0)
   throw new Error(`Blender failed: ${result.signal ?? result.status}`);
-const reports = await validateAssetSet(
-  outputRoot,
-  resolve(root, 'assets', 'source', 'sunlit-assets.json'),
-);
+const reports = await validateAssetSet(outputRoot, courseSourcePaths(root));
 console.log(
   `Generated and validated ${reports.length} original assets in ${outputRoot}`,
 );

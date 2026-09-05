@@ -1,7 +1,7 @@
 import { access, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
+import { Box3, Color, Matrix4, Quaternion, Vector3 } from 'three';
 import { z } from 'zod';
 import {
   colliderContract,
@@ -10,12 +10,57 @@ import {
 } from '../src/game/assets/staticSolidContract.mjs';
 export { colliderContract };
 
-export const ASSET_PATHS = Object.freeze([
-  'fish/sunfin.glb',
-  'props/reef-kit.glb',
-  'courses/sunlit-shoals.visual.glb',
-  'courses/sunlit-shoals.collision.glb',
+const COURSE_PROFILES = Object.freeze({
+  'sunlit-shoals': {
+    sourceFile: 'sunlit-assets.json',
+    solidIds: [
+      'sand-bed',
+      'west-ledge',
+      'coral-mound-east',
+      'coral-mound-west',
+      'urchin-outcrop',
+    ],
+  },
+  kelpworks: {
+    sourceFile: 'kelpworks-assets.json',
+    solidIds: [
+      'kelp-seabed',
+      'kelp-west-bank',
+      'kelp-east-bank',
+      'kelp-west-roots',
+      'kelp-east-roots',
+      'kelp-urchin',
+      'kelp-channel-rock',
+    ],
+  },
+});
+const ASSET_PROFILES = Object.freeze([
+  { asset: 'fish/sunfin.glb', kind: 'fish' },
+  { asset: 'props/reef-kit.glb', kind: 'props' },
+  {
+    asset: 'courses/sunlit-shoals.visual.glb',
+    kind: 'visual',
+    courseId: 'sunlit-shoals',
+  },
+  {
+    asset: 'courses/sunlit-shoals.collision.glb',
+    kind: 'collision',
+    courseId: 'sunlit-shoals',
+  },
+  {
+    asset: 'courses/kelpworks.visual.glb',
+    kind: 'visual',
+    courseId: 'kelpworks',
+  },
+  {
+    asset: 'courses/kelpworks.collision.glb',
+    kind: 'collision',
+    courseId: 'kelpworks',
+  },
 ]);
+export const ASSET_PATHS = Object.freeze(
+  ASSET_PROFILES.map(({ asset }) => asset),
+);
 const FILE_BYTES = 2 * 1024 * 1024;
 const SET_BYTES = 5 * 1024 * 1024;
 const DECODED_COMPONENTS = 1_000_000;
@@ -187,6 +232,73 @@ const close = (a, b) => Math.abs(a - b) <= 1e-5;
 const sameVector = (a, b) =>
   a.length === b.length && a.every((value, i) => close(value, b[i]));
 const unitQuaternion = (q) => close(Math.hypot(...q), 1);
+const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const solidSourceBase = {
+  id: name,
+  position: vector,
+  collision: z.enum(['environment', 'hazard']),
+  color,
+};
+const solidSource = z.discriminatedUnion('type', [
+  z.strictObject({
+    ...solidSourceBase,
+    type: z.literal('box'),
+    halfExtents: positiveVector,
+    rotation: quaternion.refine(unitQuaternion),
+  }),
+  z.strictObject({
+    ...solidSourceBase,
+    type: z.literal('sphere'),
+    radius: finite.positive(),
+  }),
+]);
+const sourceBase = {
+  version: z.literal(1),
+  seed: z.literal(9042026),
+  palette: z.record(name, color),
+  solids: z.array(solidSource).max(256),
+};
+const sourceSchema = z.discriminatedUnion('courseId', [
+  z.strictObject({
+    ...sourceBase,
+    courseId: z.literal('sunlit-shoals'),
+    reefClusters: z.array(vector).max(256),
+  }),
+  z.strictObject({
+    ...sourceBase,
+    courseId: z.literal('kelpworks'),
+    kelpGroves: z.array(vector).max(256),
+  }),
+]);
+const sourcePathsSchema = z.strictObject({
+  'sunlit-shoals': z.string().min(1),
+  kelpworks: z.string().min(1),
+});
+
+function validateSourceSolids(solids, courseId) {
+  const ids = COURSE_PROFILES[courseId].solidIds;
+  requireThat(
+    solids.length === ids.length &&
+      new Set(solids.map(({ id }) => id)).size === ids.length &&
+      solids.every(({ id }) => ids.includes(id)),
+    `${courseId} requires exactly ${ids.length} authored solids with the required identities`,
+  );
+  const parsed = z.array(solidSource).safeParse(solids);
+  requireThat(
+    parsed.success,
+    `Invalid original source solids: ${parsed.error?.message}`,
+  );
+  return parsed.data;
+}
+
+export function courseSourcePaths(projectRoot) {
+  return Object.fromEntries(
+    Object.entries(COURSE_PROFILES).map(([id, profile]) => [
+      id,
+      resolve(projectRoot, 'assets', 'source', profile.sourceFile),
+    ]),
+  );
+}
 
 function decodeGlb(bytes) {
   requireThat(
@@ -455,7 +567,12 @@ function validateAnimations(document, accessors, fish) {
 
 /** Validate only the documented original-v1 profile, not arbitrary glTF. */
 export function validateGlb(input, asset, solids = []) {
-  requireThat(ASSET_PATHS.includes(asset), 'Unknown original asset path');
+  const profile = ASSET_PROFILES.find((profile) => profile.asset === asset);
+  requireThat(profile, 'Unknown original asset path');
+  const course = profile.courseId !== undefined;
+  const sourceSolids = course
+    ? validateSourceSolids(solids, profile.courseId)
+    : [];
   const bytes = Buffer.from(input);
   requireThat(
     bytes.length <= FILE_BYTES,
@@ -477,9 +594,8 @@ export function validateGlb(input, asset, solids = []) {
   requireThat(new Set(names).size === names.length, 'Duplicate node name');
   const accessors = readAccessors(document, binary);
   const meshes = readMeshes(document, accessors);
-  const fish = asset === ASSET_PATHS[0];
-  const course = asset.startsWith('courses/');
-  const collision = asset === ASSET_PATHS[3];
+  const fish = profile.kind === 'fish';
+  const collision = profile.kind === 'collision';
   requireThat(document.nodes.length <= 256, 'mesh node budget exceeded');
   let triangles = 0;
   let drawCalls = 0;
@@ -501,7 +617,7 @@ export function validateGlb(input, asset, solids = []) {
         'fin-pectoral-right',
       ]
     : course
-      ? solids.map((solid) => solid.id)
+      ? sourceSolids.map((solid) => solid.id)
       : ['limestone', 'coral-peach', 'coral-lavender', 'seagrass-jade'];
   for (const required of mandatory)
     requireThat(
@@ -509,11 +625,10 @@ export function validateGlb(input, asset, solids = []) {
       `Missing mandatory ${course ? 'solid ' : ''}node ${required}`,
     );
   const expected = new Map(
-    solids.map((solid) => [solid.id, colliderContract(solid)]),
+    sourceSolids.map((solid) => [solid.id, colliderContract(solid)]),
   );
-  requireThat(
-    !course || (solids.length === 5 && expected.size === 5),
-    'Sunlit requires exactly five authored solids',
+  const colors = new Map(
+    sourceSolids.map((solid) => [solid.id, new Color(solid.color).toArray()]),
   );
   const colliders = [];
   for (const node of document.nodes) {
@@ -541,6 +656,17 @@ export function validateGlb(input, asset, solids = []) {
         `solid ${node.name} node transform mismatch`,
       );
       validateSolidSurface(mesh, extras);
+      requireThat(
+        document.meshes[node.mesh].primitives.every(({ material }) =>
+          sameVector(
+            document.materials[
+              material
+            ].pbrMetallicRoughness.baseColorFactor.slice(0, 3),
+            colors.get(extras.id),
+          ),
+        ),
+        `solid ${node.name} color/source mismatch`,
+      );
       colliders.push(extras);
     } else {
       requireThat(
@@ -579,14 +705,27 @@ export function validateGlb(input, asset, solids = []) {
   };
 }
 
-export async function validateAssetSet(assetRoot, sourceFile) {
-  const source = JSON.parse(await readFile(sourceFile, 'utf8'));
+export async function validateAssetSet(assetRoot, sourcePaths) {
+  const paths = sourcePathsSchema.safeParse(sourcePaths);
   requireThat(
-    source.version === 1 &&
-      source.seed === 9042026 &&
-      Array.isArray(source.solids),
-    'Invalid original source version/seed/solids',
+    paths.success,
+    `Invalid original course source map: ${paths.error?.message}`,
   );
+  const sources = new Map();
+  for (const [courseId, sourceFile] of Object.entries(paths.data)) {
+    const source = sourceSchema.safeParse(
+      JSON.parse(await readFile(sourceFile, 'utf8')),
+    );
+    requireThat(
+      source.success,
+      `Invalid original source: ${source.error?.message}`,
+    );
+    requireThat(
+      source.data.courseId === courseId,
+      `Original source identity mismatch for ${courseId}`,
+    );
+    sources.set(courseId, validateSourceSolids(source.data.solids, courseId));
+  }
   const sizes = await Promise.all(
     ASSET_PATHS.map(async (asset) => {
       const size = (await stat(resolve(assetRoot, asset))).size;
@@ -602,11 +741,11 @@ export async function validateAssetSet(assetRoot, sourceFile) {
     'Combined byte budget exceeded',
   );
   return Promise.all(
-    ASSET_PATHS.map(async (asset) =>
+    ASSET_PROFILES.map(async ({ asset, courseId }) =>
       validateGlb(
         await readFile(resolve(assetRoot, asset)),
         asset,
-        source.solids,
+        courseId === undefined ? [] : sources.get(courseId),
       ),
     ),
   );
@@ -621,8 +760,5 @@ export async function validateProject(
       access(resolve(projectRoot, file)),
     ),
   );
-  return validateAssetSet(
-    assetRoot,
-    resolve(projectRoot, 'assets', 'source', 'sunlit-assets.json'),
-  );
+  return validateAssetSet(assetRoot, courseSourcePaths(projectRoot));
 }

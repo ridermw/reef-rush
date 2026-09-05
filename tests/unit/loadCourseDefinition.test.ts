@@ -25,12 +25,14 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it('loads generated Kelpworks without enabling course selection', async () => {
+  it('loads original gltf Kelpworks without enabling course selection', async () => {
     await expect(loadCourseDefinition('kelpworks')).resolves.toMatchObject({
       courseId: 'kelpworks',
       name: COURSE_NAMES.kelpworks,
       visuals: {
-        kind: 'generated',
+        kind: 'gltf',
+        visualAsset: 'courses/kelpworks.visual.glb',
+        collisionAsset: 'courses/kelpworks.collision.glb',
         waterColor: '#17665b',
         seabedColor: '#586d45',
       },

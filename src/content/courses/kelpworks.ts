@@ -11,7 +11,9 @@ const kelpworks = {
   summary: summary.summary,
   medalTimesMs: { gold: 24_000, silver: 36_000, bronze: 55_000 },
   visuals: {
-    kind: 'generated',
+    kind: 'gltf',
+    visualAsset: 'courses/kelpworks.visual.glb',
+    collisionAsset: 'courses/kelpworks.collision.glb',
     waterColor: '#17665b',
     seabedColor: '#586d45',
   },

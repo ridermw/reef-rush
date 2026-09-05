@@ -221,8 +221,8 @@ def reef_meshes(palette):
     return result
 
 
-def course(palette, props, collision):
-    for solid in DATA["solids"]:
+def static_solids(data):
+    for solid in data["solids"]:
         shape = {"type": solid["type"]}
         if solid["type"] == "box":
             shape["halfExtents"] = solid["halfExtents"]
@@ -242,6 +242,10 @@ def course(palette, props, collision):
         q = extras["transform"]["rotation"]
         obj.rotation_mode = "QUATERNION"
         obj.rotation_quaternion = (q[3], q[0], -q[2], q[1])
+
+
+def course(palette, props, collision):
+    static_solids(DATA)
     if collision:
         return
     for i, (x, y, z) in enumerate(DATA["reefClusters"]):
@@ -250,6 +254,57 @@ def course(palette, props, collision):
     terrace = mesh("sand-terrace", *box((2.8, 0.20, 4.5)), [palette["limestone"]], False)
     for i, z in enumerate([4, 18, 45, 58, 83, 100]):
         instance(f"decor-terrace-{i}", terrace, ((-1 if i % 2 else 1) * 18, -7.8, z))
+
+
+def kelp_meshes(palette, seed):
+    rng = random.Random(seed)
+    variants = []
+    for variant, (name, mat) in enumerate(palette.items()):
+        geometry = ([], [])
+        append_geometry(geometry, ellipsoid(0.48, 0.22, 0.42, 12, 6), (0, 0.22, 0))
+        for root in range(7):
+            angle = math.tau * root / 7
+            knee = (math.cos(angle) * 0.48, 0.30, math.sin(angle) * 0.42)
+            end = (math.cos(angle) * 0.95, 0.05, math.sin(angle) * 0.8)
+            append_geometry(geometry, branch((0, 0.36, 0), knee, 0.10, 0.075, 6))
+            append_geometry(geometry, branch(knee, end, 0.075, 0.025, 6))
+        for stalk in range(2):
+            height = 4.8 + variant * 0.65 + stalk * 0.5
+            centers = [
+                ((stalk - 0.5) * 0.55 + math.sin(i * 0.65 + variant) * i * 0.045,
+                 0.30 + height * i / 8,
+                 (stalk - 0.5) * 0.3 + math.sin(i * 0.5 + stalk) * 0.2)
+                for i in range(9)
+            ]
+            for i in range(8):
+                append_geometry(geometry, branch(centers[i], centers[i + 1],
+                                                 0.07 - i * 0.005, 0.065 - i * 0.005, 6))
+            for i in range(1, 9):
+                x, y, z = centers[i]
+                for sign in (-1, 1):
+                    reach = 0.85 + rng.random() * 0.45
+                    rise = 0.65 + rng.random() * 0.35
+                    # Broad tapered ribbon blades, closed and merged with each holdfast/stipe.
+                    points = [
+                        (x, y, z),
+                        (x + sign * reach * 0.35, y + rise * 0.12, z + 0.04),
+                        (x + sign * reach * 0.83, y + rise * 0.42, z + 0.12),
+                        (x + sign * reach, y + rise, z + 0.22),
+                        (x + sign * reach * 0.57, y + rise * 0.63, z + 0.12),
+                        (x + sign * reach * 0.20, y + rise * 0.32, z + 0.04),
+                    ]
+                    append_geometry(geometry, leaf(points, 0.025))
+        variants.append(mesh(name, *geometry, [mat]))
+    return variants
+
+
+def kelp_course(data, variants, collision):
+    static_solids(data)
+    if collision:
+        return
+    for i, position in enumerate(data["kelpGroves"]):
+        variant = i % len(variants)
+        instance(f"decor-kelp-grove-{i:02}-variant-{variant}", variants[variant], position)
 
 
 def export_asset(root, relative, build, animated=False):
@@ -308,6 +363,12 @@ def main():
                  lambda: [instance(name, data, (i * 3, 0, 0)) for i, (name, data) in enumerate(props.items())])
     export_asset(args.output_root, "courses/sunlit-shoals.visual.glb", lambda: course(palette, props, False))
     export_asset(args.output_root, "courses/sunlit-shoals.collision.glb", lambda: course(palette, props, True))
+    # New datablocks must follow all four original exports to preserve their names and bytes.
+    kelp = json.loads((SOURCE / "kelpworks-assets.json").read_text(encoding="utf-8"))
+    kelp_palette = {name: material(name, color) for name, color in kelp["palette"].items()}
+    variants = kelp_meshes(kelp_palette, kelp["seed"])
+    export_asset(args.output_root, "courses/kelpworks.visual.glb", lambda: kelp_course(kelp, variants, False))
+    export_asset(args.output_root, "courses/kelpworks.collision.glb", lambda: kelp_course(kelp, variants, True))
 
 
 if __name__ == "__main__":
