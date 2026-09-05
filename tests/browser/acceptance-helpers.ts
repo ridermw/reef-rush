@@ -6,6 +6,10 @@ import {
   sunlitSteeringTarget,
   sunlitWaypoints,
 } from '../fixtures/sunlitWaypointPolicy';
+import {
+  courseKeyboardPolicy,
+  type KeyboardObservation,
+} from '../fixtures/courseKeyboardPolicy';
 
 export const progressKey = 'reef-rush.progress';
 
@@ -142,6 +146,7 @@ export async function driveSunlit(page: Page) {
   let waypoint = 0;
   let approachingCheckpoint = false;
   let nextRecoveryLog = 0;
+  let previous: KeyboardObservation | undefined;
   let state = await snapshot(page);
   const deadline = Date.now() + 120_000;
   try {
@@ -192,23 +197,14 @@ export async function driveSunlit(page: Page) {
         );
         nextRecoveryLog = state.frame.steps + 120;
       }
-      const [x, y, z] = steering.target;
-      const dx = x - fish.position[0];
-      const dy = y - fish.position[1];
-      const dz = z - fish.position[2];
-      const yawError = Math.atan2(
-        Math.sin(Math.atan2(dx, dz) - fish.yaw),
-        Math.cos(Math.atan2(dx, dz) - fish.yaw),
-      );
-      const pitch = Math.atan2(dy, Math.max(1, Math.hypot(dx, dz)));
-      const keys = new Set<string>();
-      if (Math.abs(yawError) > 0.025) keys.add(yawError > 0 ? 'a' : 'd');
-      if (Math.abs(pitch - fish.pitch) > 0.06)
-        keys.add(pitch > fish.pitch ? 'ArrowUp' : 'ArrowDown');
-      const speed = Math.hypot(...fish.velocity);
-      if (speed > 4) keys.add('s');
-      else if (speed < 3) keys.add('w');
-      if (Math.abs(yawError) > 0.6) keys.add('Shift');
+      const keyboardObservation = { fish, steps: state.frame.steps };
+      const decision = courseKeyboardPolicy({
+        observation: keyboardObservation,
+        previous,
+        target: steering.target,
+      });
+      previous = keyboardObservation;
+      const keys = new Set<string>(decision.keys);
       for (const key of held) {
         if (!keys.has(key)) {
           await page.keyboard.up(key);
