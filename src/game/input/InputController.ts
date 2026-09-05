@@ -1,4 +1,9 @@
 import type { InputFrame } from './InputFrame';
+import {
+  DEFAULT_INPUT_PREFERENCES,
+  inputPreferencesSchema,
+  type InputPreferences,
+} from '../../settings/settings';
 
 export type { InputFrame } from './InputFrame';
 
@@ -10,6 +15,7 @@ type ListenerTarget = Pick<
 export interface InputOptions {
   readonly isPlaying?: () => boolean;
   readonly pointerSurface?: HTMLElement;
+  readonly preferences?: InputPreferences;
 }
 
 const EDITABLE_TARGETS =
@@ -70,6 +76,7 @@ function getKeyCode(event: KeyboardEvent): string {
 
 export class InputController {
   private readonly target: ListenerTarget;
+  private preferences: InputPreferences;
   private readonly keyStates = new Set<string>();
   private pendingPointerX = 0;
   private pendingPointerY = 0;
@@ -134,7 +141,7 @@ export class InputController {
   };
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
-    if (!this.isPlaying()) return;
+    if (!this.isPlaying() || !this.preferences.mouseSteering) return;
     if (
       this.options.pointerSurface &&
       (!(event.target instanceof Node) ||
@@ -155,6 +162,11 @@ export class InputController {
     target: ListenerTarget = window,
     private readonly options: InputOptions = {},
   ) {
+    this.preferences = inputPreferencesSchema.parse(
+      options.preferences === undefined
+        ? DEFAULT_INPUT_PREFERENCES
+        : options.preferences,
+    );
     this.target = target;
     this.target.addEventListener('keydown', this.handleKeyDown);
     this.target.addEventListener('keyup', this.handleKeyUp);
@@ -170,21 +182,32 @@ export class InputController {
     this.handleBlur();
   }
 
+  /** Replace all mouse preferences; held keys and queued actions are preserved. */
+  setPreferences(input: unknown): void {
+    const preferences = inputPreferencesSchema.parse(input);
+    this.preferences = preferences;
+    this.pendingPointerX = 0;
+    this.pendingPointerY = 0;
+  }
+
   readFrame(): InputFrame {
     const horizontal = this.getAxis(
-      ['KeyA', 'ArrowLeft'],
       ['KeyD', 'ArrowRight'],
+      ['KeyA', 'ArrowLeft'],
     );
-    const vertical = this.getAxis(['ArrowUp'], ['ArrowDown']);
+    const vertical = this.getAxis(['ArrowDown'], ['ArrowUp']);
     const throttle = this.getAxis(['KeyS'], ['KeyW']);
-    const pointerX = this.pendingPointerX;
-    const pointerY = this.pendingPointerY;
+    const pointerX = this.pendingPointerX * this.preferences.mouseSensitivity;
+    const pointerY =
+      this.pendingPointerY *
+      this.preferences.mouseSensitivity *
+      (this.preferences.invertMouseY ? -1 : 1);
 
     this.pendingPointerX = 0;
     this.pendingPointerY = 0;
 
-    const steerX = clampAxis(horizontal + pointerX);
-    const steerY = clampAxis(vertical + pointerY);
+    const steerX = clampAxis(horizontal - pointerX);
+    const steerY = clampAxis(vertical - pointerY);
     const dashPressed = this.dashQueued;
     const pausePressed = this.pauseQueued;
 

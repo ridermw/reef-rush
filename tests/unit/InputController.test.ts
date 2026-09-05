@@ -1,5 +1,21 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { InputController } from '../../src/game/input/InputController';
+import {
+  DEFAULT_INPUT_PREFERENCES,
+  type InputPreferences,
+} from '../../src/settings/settings';
+
+const preferenceControllers: InputController[] = [];
+
+function withPreferences(
+  preferences: InputPreferences = DEFAULT_INPUT_PREFERENCES,
+) {
+  const controller = new InputController(window, { preferences });
+  preferenceControllers.push(controller);
+  window.innerWidth = 200;
+  window.innerHeight = 100;
+  return controller;
+}
 
 function dispatchKeyboardEvent(
   type: 'keydown' | 'keyup',
@@ -16,6 +32,8 @@ function dispatchPointerMove(movementX: number, movementY: number): void {
 }
 
 afterEach(() => {
+  for (const controller of preferenceControllers.splice(0))
+    controller.destroy();
   vi.restoreAllMocks();
 });
 
@@ -30,8 +48,8 @@ it('reads keyboard axes, one-shot actions, and clears consumed presses', () => {
   dispatchKeyboardEvent('keydown', { code: 'Escape' });
 
   expect(controller.readFrame()).toMatchObject({
-    steerX: 1,
-    steerY: -1,
+    steerX: -1,
+    steerY: 1,
     throttle: 1,
     dashPressed: true,
     brakeHeld: true,
@@ -39,8 +57,8 @@ it('reads keyboard axes, one-shot actions, and clears consumed presses', () => {
   });
 
   expect(controller.readFrame()).toMatchObject({
-    steerX: 1,
-    steerY: -1,
+    steerX: -1,
+    steerY: 1,
     throttle: 1,
     dashPressed: false,
     brakeHeld: true,
@@ -101,7 +119,7 @@ it('does not map ArrowUp to throttle', () => {
 
   expect(controller.readFrame()).toMatchObject({
     steerX: 0,
-    steerY: -1,
+    steerY: 1,
     throttle: 0,
   });
 
@@ -116,8 +134,8 @@ it('normalizes pointer movement and clamps axes to the unit range', () => {
   dispatchPointerMove(80, -120);
 
   expect(controller.readFrame()).toMatchObject({
-    steerX: 0.8,
-    steerY: -1,
+    steerX: -0.8,
+    steerY: 1,
     throttle: 0,
     dashPressed: false,
     brakeHeld: false,
@@ -222,7 +240,7 @@ it('only steers from pointer movement on the owned canvas, not HUD controls', ()
   move(button);
   expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
   move(canvas);
-  expect(controller.readFrame().steerX).toBeGreaterThan(0);
+  expect(controller.readFrame().steerX).toBeLessThan(0);
   controller.destroy();
   canvas.remove();
   button.remove();
@@ -271,3 +289,194 @@ it.each(['button', 'role-button'])(
     }
   },
 );
+
+it('disables only pointer steering, leaving keyboard axes and actions available', () => {
+  const controller = withPreferences({
+    ...DEFAULT_INPUT_PREFERENCES,
+    mouseSteering: false,
+  });
+  dispatchPointerMove(500, -500);
+  expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+  for (const code of [
+    'KeyD',
+    'ArrowUp',
+    'KeyW',
+    'ShiftLeft',
+    'Space',
+    'Escape',
+  ]) {
+    dispatchKeyboardEvent('keydown', { code });
+  }
+  expect(controller.readFrame()).toEqual({
+    steerX: -1,
+    steerY: 1,
+    throttle: 1,
+    brakeHeld: true,
+    dashPressed: true,
+    pausePressed: true,
+  });
+});
+
+it.each([
+  { sensitivity: 0.25, dx: 200, dy: -100, x: -0.5, y: 0.5 },
+  { sensitivity: 1, dx: 50, dy: -25, x: -0.5, y: 0.5 },
+  { sensitivity: 2, dx: 30, dy: -15, x: -0.6, y: 0.6 },
+  { sensitivity: 2, dx: 80, dy: -40, x: -1, y: 1 },
+])(
+  'scales normalized pointer deltas before the final clamp: $sensitivity ($dx, $dy)',
+  ({ sensitivity, dx, dy, x, y }) => {
+    const controller = withPreferences({
+      ...DEFAULT_INPUT_PREFERENCES,
+      mouseSensitivity: sensitivity,
+    });
+    dispatchPointerMove(dx / 2, dy / 2);
+    dispatchPointerMove(dx / 2, dy / 2);
+    expect(controller.readFrame()).toMatchObject({ steerX: x, steerY: y });
+    expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+  },
+);
+
+it('inverts mouse pitch only, never arrow pitch or horizontal steering', () => {
+  const controller = withPreferences({
+    ...DEFAULT_INPUT_PREFERENCES,
+    invertMouseY: true,
+  });
+  dispatchPointerMove(40, -20);
+  expect(controller.readFrame()).toMatchObject({ steerX: -0.4, steerY: -0.4 });
+  dispatchKeyboardEvent('keydown', { code: 'ArrowUp' });
+  expect(controller.readFrame().steerY).toBe(1);
+  dispatchKeyboardEvent('keyup', { code: 'ArrowUp' });
+  dispatchKeyboardEvent('keydown', { code: 'ArrowDown' });
+  expect(controller.readFrame().steerY).toBe(-1);
+});
+
+it('clears stale pointer deltas on preference changes without resetting held keys or queued actions', () => {
+  const controller = withPreferences();
+  for (const code of [
+    'KeyD',
+    'ArrowUp',
+    'KeyW',
+    'ShiftLeft',
+    'Space',
+    'Escape',
+  ]) {
+    dispatchKeyboardEvent('keydown', { code });
+  }
+  dispatchPointerMove(-40, 20);
+  controller.setPreferences({
+    ...DEFAULT_INPUT_PREFERENCES,
+    mouseSensitivity: 0.25,
+  });
+  expect(controller.readFrame()).toEqual({
+    steerX: -1,
+    steerY: 1,
+    throttle: 1,
+    brakeHeld: true,
+    dashPressed: true,
+    pausePressed: true,
+  });
+  expect(controller.readFrame()).toMatchObject({
+    steerX: -1,
+    steerY: 1,
+    throttle: 1,
+    brakeHeld: true,
+    dashPressed: false,
+    pausePressed: false,
+  });
+  for (const code of ['KeyD', 'ArrowUp', 'KeyW', 'ShiftLeft']) {
+    dispatchKeyboardEvent('keyup', { code });
+  }
+  dispatchPointerMove(40, -20);
+  expect(controller.readFrame()).toMatchObject({ steerX: -0.1, steerY: 0.1 });
+});
+
+it('never replays pointer movement across disable and re-enable changes', () => {
+  const controller = withPreferences();
+  dispatchPointerMove(40, -20);
+  controller.setPreferences({
+    ...DEFAULT_INPUT_PREFERENCES,
+    mouseSteering: false,
+  });
+  expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+  dispatchPointerMove(40, -20);
+  controller.setPreferences(DEFAULT_INPUT_PREFERENCES);
+  expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+  dispatchPointerMove(40, -20);
+  expect(controller.readFrame()).toMatchObject({ steerX: -0.4, steerY: 0.4 });
+});
+
+it.each([
+  { mouseSensitivity: 0.249 },
+  { mouseSensitivity: 2.001 },
+  { mouseSensitivity: NaN },
+  { mouseSensitivity: Infinity },
+  { mouseSensitivity: '1' },
+  { mouseSteering: 1 },
+  { invertMouseY: 'true' },
+  { invertMouseY: undefined },
+  { version: 1 },
+  { extra: true },
+])(
+  'rejects invalid preferences before mutating preferences, pending deltas, or actions %#',
+  (patch) => {
+    const controller = withPreferences({
+      ...DEFAULT_INPUT_PREFERENCES,
+      mouseSensitivity: 0.5,
+    });
+    dispatchPointerMove(40, -20);
+    dispatchKeyboardEvent('keydown', { code: 'KeyW' });
+    dispatchKeyboardEvent('keydown', { code: 'Space' });
+    expect(() =>
+      controller.setPreferences({ ...DEFAULT_INPUT_PREFERENCES, ...patch }),
+    ).toThrow();
+    expect(controller.readFrame()).toMatchObject({
+      steerX: -0.2,
+      steerY: 0.2,
+      throttle: 1,
+      dashPressed: true,
+    });
+    dispatchPointerMove(40, -20);
+    expect(controller.readFrame()).toMatchObject({
+      steerX: -0.2,
+      steerY: 0.2,
+      throttle: 1,
+    });
+  },
+);
+
+it('requires complete preferences and copies both constructor and replacement values', () => {
+  const preferences = { ...DEFAULT_INPUT_PREFERENCES, mouseSensitivity: 0.5 };
+  const controller = withPreferences(preferences);
+  preferences.mouseSensitivity = 2;
+  dispatchPointerMove(40, -20);
+  expect(controller.readFrame()).toMatchObject({ steerX: -0.2, steerY: 0.2 });
+  const replacement = { ...DEFAULT_INPUT_PREFERENCES, invertMouseY: true };
+  controller.setPreferences(replacement);
+  replacement.invertMouseY = false;
+  dispatchPointerMove(40, -20);
+  expect(() => controller.setPreferences({ mouseSteering: false })).toThrow();
+  expect(controller.readFrame()).toMatchObject({ steerX: -0.4, steerY: -0.4 });
+});
+
+it.each([0.249, 2.001, NaN, Infinity])(
+  'rejects constructor sensitivity %s before installing listeners',
+  (mouseSensitivity) => {
+    const listener = vi.spyOn(window, 'addEventListener');
+    expect(() =>
+      withPreferences({ ...DEFAULT_INPUT_PREFERENCES, mouseSensitivity }),
+    ).toThrow();
+    expect(listener).not.toHaveBeenCalled();
+  },
+);
+
+it('still cancels opposing horizontal keys with preferences enabled', () => {
+  const controller = withPreferences({
+    ...DEFAULT_INPUT_PREFERENCES,
+    invertMouseY: true,
+    mouseSensitivity: 2,
+  });
+  for (const code of ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight']) {
+    dispatchKeyboardEvent('keydown', { code });
+  }
+  expect(controller.readFrame().steerX).toBe(0);
+});

@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 const axisSchema = z.number().finite().min(-1).max(1);
 
-/** Normalized input only: validation never clamps axes or coerces actions. */
+/**
+ * Normalized mathematical axes, not screen-space directions:
+ * steerX > 0 increases right-handed yaw (+Z forward turns camera-left);
+ * steerY > 0 increases pitch (nose up); throttle > 0 accelerates.
+ * Validation never clamps axes or coerces actions.
+ */
 export const inputFrameSchema = z.object({
   steerX: axisSchema,
   steerY: axisSchema,

@@ -1,6 +1,11 @@
 import { expect, type Page } from '@playwright/test';
 import sunlit from '../../src/content/courses/sunlitShoals';
 import type { HostSnapshot } from '../../src/game/core/GameHost';
+import {
+  advanceSunlitWaypoint,
+  sunlitSteeringTarget,
+  sunlitWaypoints,
+} from '../fixtures/sunlitWaypointPolicy';
 
 export const progressKey = 'reef-rush.progress';
 
@@ -134,22 +139,15 @@ export async function expectIdle(page: Page) {
 // Authored CP/pearl route from the real SceneRuntime and GameHost traversals.
 // All control goes through Playwright's native keyboard; snapshots are read-only.
 export async function driveSunlit(page: Page) {
-  const points = [
-    sunlit.checkpoints[0].position,
-    sunlit.pearls[0].position,
-    sunlit.checkpoints[1].position,
-    sunlit.pearls[1].position,
-    sunlit.checkpoints[2].position,
-    sunlit.pearls[2].position,
-    sunlit.pearls[3].position,
-    [0, -4, 93],
-  ];
   const held = new Set<string>();
   const checkpoints: number[] = [];
   const pearls: number[] = [];
   const hudCheckpoints = new Set<number>();
   const hudPearls = new Set<number>();
+  const recoveryWaypoints = new Set<number>();
   let waypoint = 0;
+  let approachingCheckpoint = false;
+  let nextRecoveryLog = 0;
   let state = await snapshot(page);
   const deadline = Date.now() + 120_000;
   try {
@@ -161,16 +159,46 @@ export async function driveSunlit(page: Page) {
         checkpoints.push(race.checkpointIndex);
       if (race.pearlCount !== (pearls.at(-1) ?? 0))
         pearls.push(race.pearlCount);
-      while (
-        waypoint < points.length - 1 &&
-        fish.position[2] >= points[waypoint][2]
-      ) {
+      const observation = {
+        position: fish.position,
+        checkpointIndex: race.checkpointIndex,
+        pearlCount: race.pearlCount,
+      };
+      const nextWaypoint = advanceSunlitWaypoint(waypoint, observation);
+      while (waypoint < nextWaypoint) {
         console.info(
-          `Waypoint ${waypoint}: ${JSON.stringify({ position: fish.position, pitch: fish.pitch, yaw: fish.yaw, pearls: race.pearlCount })}`,
+          `Waypoint ${waypoint}: ${JSON.stringify({ position: fish.position, pitch: fish.pitch, yaw: fish.yaw, checkpoints: race.checkpointIndex, pearls: race.pearlCount })}`,
         );
         waypoint++;
+        approachingCheckpoint = false;
       }
-      const [x, y, z] = points[waypoint];
+      const steering = sunlitSteeringTarget(
+        waypoint,
+        observation,
+        approachingCheckpoint,
+      );
+      approachingCheckpoint = steering.approachingCheckpoint;
+      const goal = sunlitWaypoints[waypoint];
+      if (
+        !recoveryWaypoints.has(waypoint) &&
+        (approachingCheckpoint ||
+          (fish.position[2] >= goal.position[2] &&
+            (race.checkpointIndex < goal.checkpoints ||
+              race.pearlCount < goal.pearls)))
+      ) {
+        recoveryWaypoints.add(waypoint);
+        nextRecoveryLog = 0;
+      }
+      if (
+        recoveryWaypoints.has(waypoint) &&
+        state.frame.steps >= nextRecoveryLog
+      ) {
+        console.info(
+          `Recovering waypoint ${waypoint}: ${JSON.stringify({ ...observation, target: steering.target, approachingCheckpoint, yaw: fish.yaw, pitch: fish.pitch, steps: state.frame.steps })}`,
+        );
+        nextRecoveryLog = state.frame.steps + 120;
+      }
+      const [x, y, z] = steering.target;
       const dx = x - fish.position[0];
       const dy = y - fish.position[1];
       const dz = z - fish.position[2];
@@ -180,9 +208,9 @@ export async function driveSunlit(page: Page) {
       );
       const pitch = Math.atan2(dy, Math.max(1, Math.hypot(dx, dz)));
       const keys = new Set<string>();
-      if (Math.abs(yawError) > 0.025) keys.add(yawError > 0 ? 'd' : 'a');
+      if (Math.abs(yawError) > 0.025) keys.add(yawError > 0 ? 'a' : 'd');
       if (Math.abs(pitch - fish.pitch) > 0.06)
-        keys.add(pitch > fish.pitch ? 'ArrowDown' : 'ArrowUp');
+        keys.add(pitch > fish.pitch ? 'ArrowUp' : 'ArrowDown');
       const speed = Math.hypot(...fish.velocity);
       if (speed > 4) keys.add('s');
       else if (speed < 3) keys.add('w');
@@ -274,7 +302,7 @@ export async function driveSunlit(page: Page) {
   expect(after.frame.steps).toBe(state.frame.steps);
   expect(after.race).toEqual(state.race);
   console.info(
-    `Real keyboard finish: ${JSON.stringify({ result, steps: state.frame.steps, checkpoints, pearls, hudCheckpoints: [...hudCheckpoints], hudPearls: [...hudPearls] })}`,
+    `Real keyboard finish: ${JSON.stringify({ result, steps: state.frame.steps, checkpoints, pearls, hudCheckpoints: [...hudCheckpoints], hudPearls: [...hudPearls], recoveryWaypoints: [...recoveryWaypoints] })}`,
   );
   return result;
 }
