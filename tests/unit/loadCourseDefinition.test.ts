@@ -43,10 +43,28 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it.each(['blacksmoker-run'])(
-    'rejects unbuilt %s without a fallback',
+  it('loads generated Blacksmoker without activating availability', async () => {
+    await expect(
+      loadCourseDefinition('blacksmoker-run'),
+    ).resolves.toMatchObject({
+      courseId: 'blacksmoker-run',
+      name: COURSE_NAMES['blacksmoker-run'],
+      visuals: {
+        kind: 'generated',
+        waterColor: '#102b3a',
+        seabedColor: '#293c46',
+      },
+      medalTimesMs: { gold: 34_000, silver: 52_000, bronze: 75_000 },
+    });
+    expect(
+      COURSES.find((course) => course.id === 'blacksmoker-run')?.available,
+    ).toBe(false);
+  });
+
+  it.each(['sunlit-shoals', 'kelpworks', 'blacksmoker-run'])(
+    'rejects an injected missing importer for %s without a fallback',
     async (id) => {
-      await expect(loadCourseDefinition(id)).rejects.toThrow(
+      await expect(loadCourseDefinition(id, {})).rejects.toThrow(
         `Course "${id}" is not implemented`,
       );
     },

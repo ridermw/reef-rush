@@ -12,6 +12,7 @@ export type CourseLoaders = Readonly<
 const COURSE_LOADERS: CourseLoaders = {
   'sunlit-shoals': () => import('../../content/courses/sunlitShoals'),
   kelpworks: () => import('../../content/courses/kelpworks'),
+  'blacksmoker-run': () => import('../../content/courses/blacksmokerRun'),
 };
 const courseIdSchema = z.enum(COURSE_IDS);
 const courseModuleSchema = z.object({ default: courseDefinitionSchema });

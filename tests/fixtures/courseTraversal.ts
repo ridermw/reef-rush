@@ -12,17 +12,17 @@ import {
 } from '../../src/game/input/InputFrame';
 import type { RaceEvent } from '../../src/game/race/raceTypes';
 
-export const KELPWORKS_STEP_SECONDS = 1 / 60;
-export const KELPWORKS_MAX_STEPS = 120 * 60;
-export type KelpworksProfile = 'fast' | 'conservative';
+export const TRAVERSAL_STEP_SECONDS = 1 / 60;
+export const TRAVERSAL_MAX_STEPS = 7200;
+export type TraversalProfile = 'fast' | 'conservative';
 
-export interface KelpworksWaypoint {
+export interface CourseWaypoint {
   position: Vector3;
   id: string;
   checkpointIndex?: number;
 }
 
-export function kelpworksWaypoints(definition: CourseDefinition) {
+export function courseWaypoints(definition: CourseDefinition) {
   return [
     ...definition.checkpoints.map((checkpoint, index) => ({
       position: checkpoint.position,
@@ -36,8 +36,8 @@ export function kelpworksWaypoints(definition: CourseDefinition) {
   ].sort((a, b) => a.position[2] - b.position[2]);
 }
 
-export function advanceKelpworksWaypoint(
-  goals: readonly KelpworksWaypoint[],
+export function advanceCourseWaypoint(
+  goals: readonly CourseWaypoint[],
   waypoint: number,
   observed: SceneSnapshot,
 ) {
@@ -53,8 +53,8 @@ export function advanceKelpworksWaypoint(
   return waypoint;
 }
 
-export function kelpworksSteeringTarget(
-  goal: KelpworksWaypoint,
+export function courseSteeringTarget(
+  goal: CourseWaypoint,
   observed: SceneSnapshot,
   approachingCheckpoint = false,
 ) {
@@ -83,12 +83,12 @@ function clampAxis(value: number) {
   return Math.max(-1, Math.min(1, value));
 }
 
-export function traverseKelpworks(
+export function traverseCourse(
   runtime: SceneRuntime,
-  profile: KelpworksProfile,
+  profile: TraversalProfile,
   observe?: (snapshot: SceneSnapshot) => void,
 ) {
-  const goals = kelpworksWaypoints(runtime.definition);
+  const goals = courseWaypoints(runtime.definition);
   const events: RaceEvent[] = [];
   const milestones: Array<{ id: string; step: number; position: Vector3 }> = [];
   const collisions: Array<{ step: number; position: Vector3 }> = [];
@@ -101,16 +101,16 @@ export function traverseKelpworks(
   runtime.start();
   for (
     ;
-    steps < KELPWORKS_MAX_STEPS &&
+    steps < TRAVERSAL_MAX_STEPS &&
     runtime.getSnapshot().race.status !== 'finished';
     steps++
   ) {
     const snapshot = runtime.getSnapshot();
     observe?.(snapshot);
-    const nextWaypoint = advanceKelpworksWaypoint(goals, waypoint, snapshot);
+    const nextWaypoint = advanceCourseWaypoint(goals, waypoint, snapshot);
     if (nextWaypoint !== waypoint) approachingCheckpoint = false;
     waypoint = nextWaypoint;
-    const steering = kelpworksSteeringTarget(
+    const steering = courseSteeringTarget(
       goals[waypoint],
       snapshot,
       approachingCheckpoint,
@@ -142,7 +142,7 @@ export function traverseKelpworks(
     });
     if (input.dashPressed) lastDashStep = steps;
     if (Math.abs(input.steerX) > 0.01) steeringSteps++;
-    const result = runtime.step(input, KELPWORKS_STEP_SECONDS);
+    const result = runtime.step(input, TRAVERSAL_STEP_SECONDS);
     events.push(...result.raceEvents);
     for (const event of result.raceEvents) {
       if (event.type !== 'finish') {
@@ -161,7 +161,7 @@ export function traverseKelpworks(
           position: result.snapshot.fish.position,
         });
     }
-    runtime.present(1, KELPWORKS_STEP_SECONDS);
+    runtime.present(1, TRAVERSAL_STEP_SECONDS);
   }
   return {
     steps,

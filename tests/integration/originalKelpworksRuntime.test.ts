@@ -9,10 +9,7 @@ import {
   type SceneRuntime,
 } from '../../src/game/core/SceneRuntime';
 import { createGeneratedSceneVisuals } from '../../src/game/rendering/createGeneratedSceneVisuals';
-import {
-  traverseKelpworks,
-  kelpworksWaypoints,
-} from '../fixtures/kelpworksTraversal';
+import { traverseCourse, courseWaypoints } from '../fixtures/courseTraversal';
 import {
   fishAsset,
   kelpCollisionAsset,
@@ -54,7 +51,7 @@ it.each(['fast', 'conservative'] as const)(
     );
     scenes.push(reference);
     expect(reference.definition.visuals.kind).toBe('generated');
-    const generated = traverseKelpworks(reference, profile);
+    const generated = traverseCourse(reference, profile);
     reference.dispose();
     expect(fetch).not.toHaveBeenCalled();
     expect(generated.steps).toBe(reviewed[profile].steps);
@@ -123,12 +120,12 @@ it.each(['fast', 'conservative'] as const)(
       expect(runtime.scene.getObjectByName('current-particles')?.visible).toBe(
         cycle !== 1,
       );
-      const actual = traverseKelpworks(runtime, profile);
+      const actual = traverseCourse(runtime, profile);
       expect(actual).toEqual(generated);
       if (cycle === 1) expect(tail.quaternion.toArray()).toEqual(initialTail);
       else expect(tail.quaternion.toArray()).not.toEqual(initialTail);
       expect(actual.milestones.map(({ id }) => id)).toEqual(
-        kelpworksWaypoints(kelpworks).map(({ id }) => id),
+        courseWaypoints(kelpworks).map(({ id }) => id),
       );
       expect(
         actual.events.filter(({ type }) => type === 'checkpoint'),

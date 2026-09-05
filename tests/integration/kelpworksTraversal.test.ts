@@ -16,12 +16,12 @@ import {
 } from '../../src/game/progression/progress';
 import { createGeneratedSceneVisuals } from '../../src/game/rendering/createGeneratedSceneVisuals';
 import {
-  advanceKelpworksWaypoint,
-  KELPWORKS_MAX_STEPS,
-  kelpworksSteeringTarget,
-  kelpworksWaypoints,
-  traverseKelpworks,
-} from '../fixtures/kelpworksTraversal';
+  advanceCourseWaypoint,
+  TRAVERSAL_MAX_STEPS,
+  courseSteeringTarget,
+  courseWaypoints,
+  traverseCourse,
+} from '../fixtures/courseTraversal';
 import { generatedSunlit, traverseSunlit } from '../fixtures/sunlitTraversal';
 
 const scenes: SceneRuntime[] = [];
@@ -91,15 +91,15 @@ it('authors the five-checkpoint slalom, five pearls and seven primitive solids',
 
 it('advances only on actual milestone awards and retains an upstream checkpoint recovery target', async () => {
   const { runtime } = await setup();
-  const goals = kelpworksWaypoints(runtime.definition);
+  const goals = courseWaypoints(runtime.definition);
   const ready = runtime.getSnapshot();
   const downstream = {
     ...ready,
     fish: { ...ready.fish, position: [0, -4, 25] as const },
   };
-  expect(advanceKelpworksWaypoint(goals, 0, downstream)).toBe(0);
-  expect(advanceKelpworksWaypoint(goals, 1, downstream)).toBe(1);
-  expect(kelpworksSteeringTarget(goals[0], downstream)).toEqual({
+  expect(advanceCourseWaypoint(goals, 0, downstream)).toBe(0);
+  expect(advanceCourseWaypoint(goals, 1, downstream)).toBe(1);
+  expect(courseSteeringTarget(goals[0], downstream)).toEqual({
     target: [0, -4, 8],
     approachingCheckpoint: true,
   });
@@ -107,12 +107,12 @@ it('advances only on actual milestone awards and retains an upstream checkpoint 
     ...downstream,
     fish: { ...ready.fish, position: [0, -4, 13] as const },
   };
-  expect(kelpworksSteeringTarget(goals[0], stillApproaching, true)).toEqual({
+  expect(courseSteeringTarget(goals[0], stillApproaching, true)).toEqual({
     target: [0, -4, 8],
     approachingCheckpoint: true,
   });
   expect(
-    kelpworksSteeringTarget(
+    courseSteeringTarget(
       goals[0],
       {
         ...ready,
@@ -122,13 +122,13 @@ it('advances only on actual milestone awards and retains an upstream checkpoint 
     ),
   ).toEqual({ target: goals[0].position, approachingCheckpoint: false });
   expect(
-    advanceKelpworksWaypoint(goals, 1, {
+    advanceCourseWaypoint(goals, 1, {
       ...downstream,
       collectedPearlIds: [goals[3].id],
     }),
   ).toBe(1);
   expect(
-    advanceKelpworksWaypoint(goals, 1, {
+    advanceCourseWaypoint(goals, 1, {
       ...downstream,
       collectedPearlIds: [goals[1].id],
     }),
@@ -178,7 +178,7 @@ it('earns gold and conservative bronze through real controls, with stable owners
         currents.map((current) => [current.definition.id, 0]),
       );
       let pivotClearance = Infinity;
-      const traversal = traverseKelpworks(runtime, profile, ({ fish }) => {
+      const traversal = traverseCourse(runtime, profile, ({ fish }) => {
         for (const current of currents) {
           if (Math.hypot(...current.sampleCurrent(fish.position)) > 0) {
             currentSteps.set(
@@ -222,7 +222,7 @@ it('earns gold and conservative bronze through real controls, with stable owners
         })}`,
       );
       expect(snapshot.race.status, JSON.stringify(traversal)).toBe('finished');
-      expect(steps).toBeLessThan(KELPWORKS_MAX_STEPS);
+      expect(steps).toBeLessThan(TRAVERSAL_MAX_STEPS);
       expect(traversal.steeringSteps).toBeGreaterThan(100);
       expect(
         events
@@ -235,7 +235,7 @@ it('earns gold and conservative bronze through real controls, with stable owners
           .map((event) => event.pearlId),
       ).toEqual(runtime.definition.pearls?.map(({ id }) => id));
       expect(traversal.milestones.map(({ id }) => id)).toEqual(
-        kelpworksWaypoints(runtime.definition).map(({ id }) => id),
+        courseWaypoints(runtime.definition).map(({ id }) => id),
       );
       expect(events.map(({ elapsedMs }) => elapsedMs)).toEqual(
         events.map(({ elapsedMs }) => elapsedMs).sort((a, b) => a - b),

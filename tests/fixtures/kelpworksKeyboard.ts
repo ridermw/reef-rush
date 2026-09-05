@@ -3,10 +3,10 @@ import kelpworks from '../../src/content/courses/kelpworks';
 import type { HostSnapshot } from '../../src/game/core/GameHost';
 import type { SceneSnapshot } from '../../src/game/core/SceneRuntime';
 import {
-  advanceKelpworksWaypoint,
-  kelpworksSteeringTarget,
-  kelpworksWaypoints,
-} from './kelpworksTraversal';
+  advanceCourseWaypoint,
+  courseSteeringTarget,
+  courseWaypoints,
+} from './courseTraversal';
 import { keyboardSurface, snapshot } from '../browser/acceptance-helpers';
 
 // Binary native keys, not the normalized fixed-step controller. The authored
@@ -16,7 +16,7 @@ export async function driveKelpworks(
   onDeepCheckpoint?: (state: HostSnapshot) => Promise<void>,
 ) {
   await keyboardSurface(page);
-  const goals = kelpworksWaypoints(kelpworks);
+  const goals = courseWaypoints(kelpworks);
   const held = new Set<string>();
   const checkpoints: number[] = [];
   const pearlIds = new Set<string>();
@@ -84,11 +84,11 @@ export async function driveKelpworks(
         state = await snapshot(page);
         continue;
       }
-      const next = advanceKelpworksWaypoint(goals, waypoint, observed);
+      const next = advanceCourseWaypoint(goals, waypoint, observed);
       if (next !== waypoint) approachingCheckpoint = false;
       waypoint = next;
       const goal = goals[waypoint];
-      const steering = kelpworksSteeringTarget(
+      const steering = courseSteeringTarget(
         goal,
         observed,
         approachingCheckpoint,
