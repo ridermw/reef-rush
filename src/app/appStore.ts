@@ -17,6 +17,9 @@ export type AppAction =
   | { type: 'PRESENTATION_UPDATED'; presentation: AppPresentation }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
+  | { type: 'GRAPHICS_LOST' }
+  | { type: 'GRAPHICS_RESTORED' }
+  | { type: 'RETRY_COURSE' }
   | { type: 'REPLAY' }
   | {
       type: 'RUN_FINISHED';
@@ -36,6 +39,7 @@ export interface AppStore {
 function createInitialState(): AppState {
   return {
     screen: 'title',
+    graphicsLost: false,
     selectedCourseId: null,
     presentation: null,
     result: null,
@@ -66,6 +70,14 @@ function assertScreen(
   }
 }
 
+export function canRetryCourse(state: AppState): boolean {
+  return (
+    state.selectedCourseId !== null &&
+    (state.screen === 'error' ||
+      (state.screen === 'paused' && state.graphicsLost))
+  );
+}
+
 function reduceAppState(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'OPEN_COURSE_SELECT':
@@ -73,6 +85,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         screen: 'course-select',
+        graphicsLost: false,
         selectedCourseId: null,
         presentation: null,
         result: null,
@@ -85,6 +98,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         screen: 'loading',
+        graphicsLost: false,
         selectedCourseId: action.courseId,
         presentation: null,
         result: null,
@@ -92,11 +106,18 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
         error: null,
       };
 
+    case 'RETRY_COURSE':
     case 'REPLAY':
-      assertScreen(action.type, state.screen, ['results']);
+      if (action.type === 'REPLAY')
+        assertScreen(action.type, state.screen, ['results']);
+      else if (!canRetryCourse(state))
+        throw new Error(
+          'Cannot RETRY_COURSE without a selected course in error or paused with lost graphics.',
+        );
       return {
         ...state,
         screen: 'loading',
+        graphicsLost: false,
         presentation: null,
         result: null,
         achievements: null,
@@ -129,10 +150,26 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
 
     case 'RESUME':
       assertScreen(action.type, state.screen, ['paused']);
+      if (state.graphicsLost)
+        throw new Error('Cannot RESUME while graphics are lost.');
       return {
         ...state,
         screen: 'playing',
       };
+
+    case 'GRAPHICS_LOST':
+      assertScreen(action.type, state.screen, ['playing', 'paused', 'results']);
+      if (state.graphicsLost) return state;
+      return {
+        ...state,
+        screen: state.screen === 'playing' ? 'paused' : state.screen,
+        graphicsLost: true,
+      };
+
+    case 'GRAPHICS_RESTORED':
+      assertScreen(action.type, state.screen, ['paused', 'results']);
+      if (!state.graphicsLost) return state;
+      return { ...state, graphicsLost: false };
 
     case 'RUN_FINISHED':
       assertScreen(action.type, state.screen, ['playing']);
@@ -157,6 +194,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         screen: 'error',
+        graphicsLost: false,
         presentation: null,
         result: null,
         achievements: null,

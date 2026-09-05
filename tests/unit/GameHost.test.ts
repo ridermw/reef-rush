@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Material, Mesh } from 'three';
 import userEvent from '@testing-library/user-event';
 import { createAppStore } from '../../src/app/appStore';
 import type { CourseId } from '../../src/content/courses/courseIds';
@@ -747,6 +748,456 @@ describe('focus at asynchronous readiness', () => {
     ).toEqual(
       addDocument.mock.calls.filter(([type]) => type === 'visibilitychange'),
     );
+  });
+});
+
+describe('owned graphics loss and explicit course retry', () => {
+  function graphics(canvas: HTMLCanvasElement, type: 'lost' | 'restored') {
+    const event = new Event(`webglcontext${type}`, { cancelable: true });
+    canvas.dispatchEvent(event);
+    return event;
+  }
+
+  it.each(['playing', 'paused', 'results'] as const)(
+    'freezes %s CPU state and restores the same owner without automatic resume',
+    async (screen) => {
+      const context = new FakeContext();
+      const audio = createAudioEngine({
+        createContext: () => context,
+        isUserGesture: () => true,
+      });
+      const settings = createSettingsStore(() => ({
+        getItem: () => null,
+        setItem: () => {},
+      }));
+      settings.update({ musicEnabled: true });
+      const h = await setup({
+        audio,
+        settings,
+        loadCourse: () => Promise.resolve(definition(screen === 'results')),
+      });
+      await h.host.unlockAudio();
+      await h.load();
+      key('Space');
+      key('KeyW');
+      h.frame(17);
+      if (screen === 'paused') h.store.dispatch({ type: 'PAUSE' });
+      expect(h.store.getState().screen).toBe(screen);
+      const runtime = h.runtimes[0];
+      const resources = runtime.getDiagnostics();
+      const result = h.store.getState().result;
+      const progress = h.store.getState().progress;
+      const before = h.host.getSnapshot();
+      const dispatch = vi.spyOn(h.store, 'dispatch');
+      const staleFrame = [...h.frames.values()][0];
+      expect(graphics(h.renderer.domElement, 'lost').defaultPrevented).toBe(
+        true,
+      );
+      expect(h.host.getSnapshot()).toMatchObject({
+        graphicsLost: true,
+        screen: screen === 'results' ? 'results' : 'paused',
+        race: { status: screen === 'results' ? 'finished' : 'paused' },
+        audio: { activeEffects: 0, activeAmbience: 0 },
+        resources: { rafChains: 0, canvases: 1, scene: resources },
+      });
+      const lost = h.host.getSnapshot();
+      graphics(h.renderer.domElement, 'lost');
+      key('Escape');
+      key('Space');
+      h.elapse(60_000);
+      staleFrame(60_017);
+      h.frame(1000);
+      expect(h.host.getSnapshot().frame).toEqual(lost.frame);
+      expect(h.host.getSnapshot().player).toEqual(before.player);
+      expect(h.host.getSnapshot().race).toEqual(lost.race);
+      expect(h.host.getSnapshot().collectedPearlIds).toEqual(
+        before.collectedPearlIds,
+      );
+      expect(h.frames.size).toBe(0);
+      graphics(h.renderer.domElement, 'restored');
+      graphics(h.renderer.domElement, 'restored');
+      staleFrame(60_017);
+      expect(h.host.getSnapshot().graphicsLost).toBe(false);
+      expect(h.host.getSnapshot().race).toEqual(lost.race);
+      expect(h.frames.size).toBe(1);
+      h.frame(17);
+      expect(h.host.getSnapshot().frame.steps).toBe(before.frame.steps);
+      expect(h.host.getSnapshot().frame.rendered).toBeGreaterThan(
+        before.frame.rendered,
+      );
+      expect(h.runtimes).toEqual([runtime]);
+      expect(h.createRenderer).toHaveBeenCalledOnce();
+      expect(runtime.getDiagnostics()).toEqual(resources);
+      expect(h.renderer.dispose).not.toHaveBeenCalled();
+      expect(h.store.getState().result).toBe(result);
+      expect(h.store.getState().progress).toBe(progress);
+      expect(dispatch.mock.calls.map(([action]) => action.type)).toEqual([
+        'GRAPHICS_LOST',
+        'GRAPHICS_RESTORED',
+      ]);
+      if (screen !== 'results') {
+        h.store.dispatch({ type: 'RESUME' });
+        h.frame(17);
+        const resumed = h.host.getSnapshot();
+        expect(resumed.frame.steps - before.frame.steps).toBe(1);
+        expect(resumed.race!.elapsedMs - before.race!.elapsedMs).toBeCloseTo(
+          1000 / 60,
+        );
+        expect(resumed.audio.emittedCues.dash).toBe(
+          before.audio.emittedCues.dash,
+        );
+      }
+      key('KeyW', 'keyup');
+      key('Space', 'keyup');
+    },
+  );
+
+  it('keeps renderer listeners across detach, restores while detached and ignores removed or stale callbacks', async () => {
+    const h = await setup();
+    const add = vi.spyOn(h.renderer.domElement, 'addEventListener');
+    const remove = vi.spyOn(h.renderer.domElement, 'removeEventListener');
+    await h.load();
+    const bindings = add.mock.calls.filter(([type]) =>
+      type.startsWith('webglcontext'),
+    );
+    expect(bindings.map(([type]) => type)).toEqual([
+      'webglcontextlost',
+      'webglcontextrestored',
+    ]);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      h.host.setContainer(null);
+      graphics(h.renderer.domElement, 'lost');
+      expect(h.store.getState().graphicsLost).toBe(true);
+      h.host.setContainer(h.container);
+      expect(h.frames.size).toBe(0);
+      h.host.setContainer(null);
+      graphics(h.renderer.domElement, 'restored');
+      expect(h.store.getState().graphicsLost).toBe(false);
+      expect(h.frames.size).toBe(0);
+      h.host.setContainer(h.container);
+      expect(h.frames.size).toBe(1);
+      expect(h.store.getState().screen).toBe('paused');
+    }
+    expect(
+      remove.mock.calls.filter(([type]) => type.startsWith('webglcontext')),
+    ).toHaveLength(0);
+    vi.mocked(h.renderer.dispose).mockImplementation(() => {
+      expect(
+        remove.mock.calls.filter(([type]) => type.startsWith('webglcontext')),
+      ).toHaveLength(2);
+      graphics(h.renderer.domElement, 'lost');
+    });
+    h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+    vi.mocked(h.renderer.dispose).mockImplementation(() => {});
+    const oldCanvas = h.renderer.domElement;
+    h.createRenderer.mockResolvedValue({
+      ...h.renderer,
+      domElement: document.createElement('canvas'),
+    });
+    await h.load();
+    const next = h.host.getSnapshot();
+    for (const [type, listener] of bindings) {
+      const event = new Event(type, { cancelable: true });
+      if (typeof listener === 'function') listener.call(oldCanvas, event);
+      else listener.handleEvent(event);
+      oldCanvas.dispatchEvent(event);
+    }
+    expect(h.host.getSnapshot()).toEqual(next);
+    await h.host.dispose();
+    expect(h.host.getSnapshot().resources).toEqual({
+      canvases: 0,
+      rafChains: 0,
+      pendingCleanup: 0,
+      scene: null,
+    });
+  });
+
+  it('fresh retry restarts only the attempt and rejects calls outside error or paused loss', async () => {
+    const h = await setup();
+    expect(h.host.retryCourse).toBeTypeOf('function');
+    expect(() => h.host.retryCourse()).toThrow(/retry/i);
+    await h.load();
+    expect(() => h.host.retryCourse()).toThrow(/retry/i);
+    h.frame(50);
+    h.store.dispatch({ type: 'PAUSE' });
+    expect(() => h.host.retryCourse()).toThrow(/retry/i);
+    h.host.settings.update({ mouseSensitivity: 1.5 });
+    h.store.dispatch({
+      type: 'PROGRESS_UPDATED',
+      progress: { version: 1, courses: {} },
+      notice: 'Save pending.',
+    });
+    graphics(h.renderer.domElement, 'lost');
+    const progress = h.store.getState().progress;
+    const old = h.runtimes[0];
+    h.host.retryCourse();
+    expect(h.store.getState()).toMatchObject({
+      screen: 'loading',
+      graphicsLost: false,
+    });
+    await h.host.whenIdle();
+    expect(old.getDiagnostics().lifecycle).toBe('disposed');
+    expect(h.runtimes).toHaveLength(2);
+    expect(h.host.getSnapshot()).toMatchObject({
+      frame: { steps: 0 },
+      collectedPearlIds: [],
+      race: { elapsedMs: 0 },
+      preferences: { mouseSensitivity: 1.5 },
+    });
+    expect(h.store.getState().progress).toBe(progress);
+    expect(h.frames.size).toBe(1);
+    await h.host.dispose();
+    expect(() => h.host.retryCourse()).toThrow(/disposed/i);
+  });
+
+  it('retries failed construction cleanup only on explicit retry and reports failed retries without constructing', async () => {
+    const release = vi.fn<() => void>(() => {
+      throw new Error('child still owns resources');
+    });
+    const owner = new ConstructionCleanupError(
+      new Error('build failed'),
+      [new Error('rollback failed')],
+      [release],
+      'Retained construction',
+    );
+    const createScene = vi.fn(realScene).mockRejectedValueOnce(owner);
+    const h = await setup({ createScene });
+    await h.load();
+    const initialDetail = h.store.getState().error?.detail;
+    expect(h.host.retryCourse).toBeTypeOf('function');
+    expect(release).not.toHaveBeenCalled();
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(release).toHaveBeenCalledOnce();
+    expect(h.store.getState().screen).toBe('error');
+    expect(h.store.getState().error?.detail).toMatch(/cleanup/i);
+    const retryDetail = h.store.getState().error?.detail;
+    expect(createScene).toHaveBeenCalledOnce();
+    expect(h.host.getSnapshot().resources.pendingCleanup).toBe(1);
+    release.mockImplementation(() => {});
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(createScene).toHaveBeenCalledTimes(2);
+    expect(h.store.getState().screen).toBe('playing');
+    expect(h.host.getSnapshot().resources.pendingCleanup).toBe(0);
+    expect(initialDetail).toContain('build failed');
+    expect(initialDetail).toContain('rollback failed');
+    expect(retryDetail).toContain('child still owns resources');
+  });
+
+  it('shows a real nested scene child cleanup cause on initial failure and explicit retry', async () => {
+    const h = await setup();
+    await h.load();
+    let retained: Material | undefined;
+    h.runtimes[0].scene.traverse((node) => {
+      if (node instanceof Mesh && node.material instanceof Material)
+        retained ??= node.material;
+    });
+    if (!retained) throw new Error('Expected a real scene material.');
+    const release = vi.spyOn(retained, 'dispose').mockImplementation(() => {
+      throw new Error('scene material still owns resources');
+    });
+    try {
+      graphics(h.renderer.domElement, 'lost');
+      h.host.retryCourse();
+      await h.host.whenIdle();
+      const initialDetail = h.store.getState().error?.detail;
+      h.host.retryCourse();
+      await h.host.whenIdle();
+      expect(release).toHaveBeenCalledTimes(2);
+      expect(h.runtimes).toHaveLength(1);
+      expect(h.host.getSnapshot().resources.pendingCleanup).toBe(1);
+      expect(initialDetail).toContain('scene material still owns resources');
+      expect(h.store.getState().error?.detail).toContain(
+        'scene material still owns resources',
+      );
+    } finally {
+      release.mockRestore();
+    }
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(h.runtimes).toHaveLength(2);
+    expect(h.host.getSnapshot().resources.pendingCleanup).toBe(0);
+  });
+
+  it('reports cyclic and shared failure causes once without changing their ownership graph', async () => {
+    const child = new Error('shared child failure');
+    const failure = new AggregateError([child, child], 'outer failure', {
+      cause: child,
+    });
+    child.cause = failure;
+    const h = await setup({
+      loadCourse: () => Promise.reject(failure),
+    });
+    await h.load();
+    const detail = h.store.getState().error?.detail ?? '';
+    expect(detail).toContain('outer failure');
+    expect(detail.match(/shared child failure/g)).toHaveLength(1);
+    expect(child.cause).toBe(failure);
+    expect(failure.errors).toEqual([child, child]);
+  });
+
+  it('bounds failure history and retains the latest nested retry message', async () => {
+    const history = Array.from(
+      { length: 200 },
+      (_, index) => new Error(`older retry ${index}`),
+    );
+    const h = await setup({
+      loadCourse: () =>
+        Promise.reject(
+          new AggregateError(
+            [...history, new Error('latest retry failure')],
+            'retained owner',
+          ),
+        ),
+    });
+    await h.load();
+    const detail = h.store.getState().error?.detail ?? '';
+    expect(detail).toContain('latest retry failure');
+    expect(detail).toContain('[additional error detail omitted]');
+    expect(detail.length).toBeLessThanOrEqual(2048);
+  });
+
+  it('bounds deep failure causes and oversized error text with explicit truncation', async () => {
+    let failure: Error = new Error('x'.repeat(10_000));
+    for (let index = 0; index < 100; index++)
+      failure = new Error(`layer ${index}`, { cause: failure });
+    const h = await setup({
+      loadCourse: () => Promise.reject(failure),
+    });
+    await h.load();
+    expect(h.store.getState().error?.detail).toContain(
+      '[additional error detail omitted]',
+    );
+    expect(h.store.getState().error!.detail.length).toBeLessThanOrEqual(2048);
+    failure = new Error('x'.repeat(10_000));
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    const detail = h.store.getState().error?.detail ?? '';
+    expect(detail).toMatch(/^x+/);
+    expect(detail).toContain('[additional error detail omitted]');
+    expect(detail.length).toBeLessThanOrEqual(2048);
+  });
+
+  it('keeps failed live cleanup pending and does not retry it in the first fresh-load catch', async () => {
+    const h = await setup();
+    await h.load();
+    const dispose = vi
+      .spyOn(h.runtimes[0], 'dispose')
+      .mockImplementation(() => {
+        throw new Error('live scene retained');
+      });
+    graphics(h.renderer.domElement, 'lost');
+    expect(h.host.retryCourse).toBeTypeOf('function');
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(h.runtimes).toHaveLength(1);
+    expect(h.store.getState().screen).toBe('error');
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(dispose).toHaveBeenCalledTimes(2);
+    expect(h.runtimes).toHaveLength(1);
+    expect(h.store.getState().error?.detail).toContain('live scene retained');
+    dispose.mockRestore();
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(h.runtimes).toHaveLength(2);
+    expect(h.frames.size).toBe(1);
+  });
+
+  it('blocks a queued retry behind late cleanup and retains its failed owner', async () => {
+    const entered = deferred<void>();
+    const pending = deferred<SceneRuntime>();
+    const runtime = { ...(await realScene(definition())) };
+    const dispose = vi.spyOn(runtime, 'dispose').mockImplementation(() => {
+      throw new Error('late owner');
+    });
+    const createScene = vi.fn(realScene).mockImplementationOnce(() => {
+      entered.resolve();
+      return pending.promise;
+    });
+    const h = await setup({ createScene });
+    const load = h.load();
+    await entered.promise;
+    h.store.dispatch({
+      type: 'SHOW_ERROR',
+      title: 'Cancelled',
+      detail: 'Loading interrupted',
+    });
+    expect(h.host.retryCourse).toBeTypeOf('function');
+    h.host.retryCourse();
+    expect(h.store.getState().screen).toBe('loading');
+    expect(dispose).not.toHaveBeenCalled();
+    pending.resolve(runtime);
+    await load;
+    await h.host.whenIdle();
+    expect(createScene).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(h.store.getState().screen).toBe('error');
+    expect(h.host.getSnapshot().resources.pendingCleanup).toBe(1);
+    dispose.mockRestore();
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(createScene).toHaveBeenCalledTimes(2);
+    expect(h.store.getState().screen).toBe('playing');
+  });
+
+  it('retains a failed loss-time RAF cancellation and ignores its late callback', async () => {
+    const cancel = vi.fn<() => void>(() => {
+      throw new Error('RAF retained');
+    });
+    const h = await setup({ cancelFrame: cancel });
+    await h.load();
+    const callback = [...h.frames.values()][0];
+    graphics(h.renderer.domElement, 'lost');
+    expect(h.store.getState().screen).toBe('error');
+    expect(h.host.getSnapshot().resources.pendingCleanup).toBe(1);
+    const before = h.host.getSnapshot();
+    callback(1000);
+    expect(h.host.getSnapshot()).toEqual(before);
+    expect(cancel).toHaveBeenCalledOnce();
+    cancel.mockImplementation(() => {
+      h.frames.clear();
+    });
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(h.frames.size).toBe(1);
+  });
+
+  it('drains a withheld earned save across results loss, restoration and disposal', async () => {
+    const gate = deferred<void>();
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+      coordinateProgress: async (save) => {
+        await gate.promise;
+        save();
+      },
+    });
+    await h.load();
+    let disposed = Promise.resolve();
+    try {
+      h.frame(100);
+      expect(h.store.getState().screen).toBe('results');
+      const result = h.store.getState().result;
+      graphics(h.renderer.domElement, 'lost');
+      expect(h.store.getState().graphicsLost).toBe(true);
+      expect(h.store.getState().result).toBe(result);
+      expect(h.store.getState().progressNotice).toMatch(/pending/);
+      graphics(h.renderer.domElement, 'restored');
+      expect(h.store.getState().result).toBe(result);
+      disposed = h.host.dispose();
+      expect(h.host.getSnapshot().resources.scene).toBeNull();
+    } finally {
+      gate.resolve();
+      await disposed;
+    }
+    await h.host.whenIdle();
+    expect(JSON.parse(h.storage.get(PROGRESS_STORAGE_KEY)!)).toEqual(
+      h.store.getState().progress,
+    );
+    expect(h.store.getState().progressNotice).toBeNull();
   });
 });
 

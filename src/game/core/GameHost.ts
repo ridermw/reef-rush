@@ -1,5 +1,6 @@
 import type { WebGLRenderer } from 'three';
-import type { AppStore } from '../../app/appStore';
+import { canRetryCourse, type AppStore } from '../../app/appStore';
+import { errorDetail } from './errorDetail';
 import type { AppScreen } from '../../app/screens';
 import type { CourseId } from '../../content/courses/courseIds';
 import type { CourseDefinition } from '../course/courseDefinition';
@@ -85,6 +86,7 @@ export interface HostSnapshot {
   readonly audio: AudioSnapshot;
   readonly feedback: RunFeedback | null;
   readonly screen: AppScreen;
+  readonly graphicsLost: boolean;
   readonly player: SceneFishState | null;
   readonly race: RaceState | null;
   readonly collectedPearlIds: readonly string[];
@@ -140,6 +142,7 @@ export class GameHost {
   private container: HTMLElement | null = null;
   private scene: SceneRuntime | null = null;
   private renderer: HostRenderer | null = null;
+  private graphicsLost = false;
   private input: HostInput | null = null;
   private readonly ownedReleases: Array<() => void> = [];
   private readonly surfaceReleases: Array<() => void> = [];
@@ -160,6 +163,7 @@ export class GameHost {
   private reportingError = false;
   private observedScreen: AppScreen;
   private observedCourse: CourseId | null;
+  private observedGraphicsLost: boolean;
   private frameId: number | null = null;
   private lastTime = 0;
   private lastHudTime = 0;
@@ -210,6 +214,7 @@ export class GameHost {
     this.publishProgress();
     this.observedScreen = store.getState().screen;
     this.observedCourse = store.getState().selectedCourseId;
+    this.observedGraphicsLost = store.getState().graphicsLost;
     this.unsubscribe = store.subscribe(this.onStoreChange);
     window.addEventListener('pagehide', this.onPageHide);
     if (import.meta.env.VITE_TEST_HOOKS === 'true') {
@@ -317,6 +322,21 @@ export class GameHost {
     this.lastCleanupError = null;
   }
 
+  readonly retryCourse = (): void => {
+    if (this.disposed) throw new Error('Cannot retry a disposed GameHost.');
+    if (!canRetryCourse(this.store.getState()))
+      throw new Error(
+        'Cannot retry course without a selected course in error or paused with lost graphics.',
+      );
+    try {
+      this.retryCleanup();
+    } catch (error) {
+      this.fail(error);
+      return;
+    }
+    this.store.dispatch({ type: 'RETRY_COURSE' });
+  };
+
   async dispose(): Promise<void> {
     if (!this.disposed) {
       this.disposed = true;
@@ -376,6 +396,7 @@ export class GameHost {
       audio: this.audio.getSnapshot(),
       feedback: this.feedback.getState(this.now()),
       screen: this.store.getState().screen,
+      graphicsLost: this.graphicsLost,
       player: snapshot?.fish ?? null,
       race: snapshot?.race ?? null,
       collectedPearlIds: snapshot?.collectedPearlIds ?? [],
@@ -389,7 +410,9 @@ export class GameHost {
               ? 'loading'
               : 'idle',
       cleanupError:
-        this.lastCleanupError === null ? null : message(this.lastCleanupError),
+        this.lastCleanupError === null
+          ? null
+          : errorDetail(this.lastCleanupError),
       frame: { rendered: this.rendered, steps: this.steps },
       resources: {
         canvases: this.renderer?.domElement.parentElement ? 1 : 0,
@@ -404,13 +427,29 @@ export class GameHost {
     const state = this.store.getState();
     if (
       state.screen === this.observedScreen &&
-      state.selectedCourseId === this.observedCourse
+      state.selectedCourseId === this.observedCourse &&
+      state.graphicsLost === this.observedGraphicsLost
     )
       return;
     this.observedScreen = state.screen;
     this.observedCourse = state.selectedCourseId;
+    this.observedGraphicsLost = state.graphicsLost;
     if (this.reportingError || this.disposed) return;
     try {
+      const restored =
+        this.graphicsLost &&
+        !state.graphicsLost &&
+        (state.screen === 'paused' || state.screen === 'results');
+      if (state.graphicsLost && !this.graphicsLost) {
+        this.graphicsLost = true;
+        // Invalidate even a cancelled callback delivered after restoration.
+        this.generation += 1;
+        this.audio.setPhase('paused');
+        this.stopFrame();
+        this.resetTimingAndInput();
+      } else if (!state.graphicsLost) {
+        this.graphicsLost = false;
+      }
       switch (state.screen) {
         case 'loading':
           this.audio.setPhase('idle');
@@ -434,13 +473,18 @@ export class GameHost {
           }
           break;
         case 'results':
-          this.audio.setPhase('results');
+          this.audio.setPhase(state.graphicsLost ? 'paused' : 'results');
           this.resetTimingAndInput();
           break;
         default:
           this.audio.setPhase('idle');
           this.generation += 1;
           this.cleanupCurrent();
+      }
+      if (restored) {
+        this.resetTimingAndInput();
+        this.resize();
+        this.scheduleFrame();
       }
     } catch (error) {
       this.fail(error);
@@ -511,6 +555,7 @@ export class GameHost {
       this.scene = scene;
       this.applyPresentationPreferences();
       this.renderer = renderer;
+      this.bindGraphicsEvents(renderer, scene);
       this.rendered = 0;
       this.steps = 0;
       // Canvas focus during attachment must not erase a loss of window focus while loading.
@@ -562,7 +607,10 @@ export class GameHost {
         new InputController(window, { pointerSurface: surface, isPlaying }))
     )(
       canvas,
-      () => !this.settingsOpen && this.store.getState().screen === 'playing',
+      () =>
+        !this.settingsOpen &&
+        !this.graphicsLost &&
+        this.store.getState().screen === 'playing',
     );
     this.input = input;
     this.surfaceReleases.push(() => input.destroy());
@@ -592,6 +640,41 @@ export class GameHost {
     canvas.focus({ preventScroll: true });
   }
 
+  private bindGraphicsEvents(
+    renderer: HostRenderer,
+    scene: SceneRuntime,
+  ): void {
+    const ownsRuntime = () => {
+      const screen = this.store.getState().screen;
+      return (
+        !this.disposed &&
+        this.renderer === renderer &&
+        this.scene === scene &&
+        (screen === 'playing' || screen === 'paused' || screen === 'results')
+      );
+    };
+    const lost = (event: Event) => {
+      if (!ownsRuntime()) return;
+      event.preventDefault();
+      if (this.graphicsLost) return;
+      this.store.dispatch({ type: 'GRAPHICS_LOST' });
+    };
+    const restored = () => {
+      if (!ownsRuntime() || !this.graphicsLost) return;
+      this.store.dispatch({ type: 'GRAPHICS_RESTORED' });
+    };
+    const canvas = renderer.domElement;
+    // LIFO releases remove these before renderer disposal/forced context loss.
+    canvas.addEventListener('webglcontextlost', lost);
+    this.ownedReleases.push(() =>
+      canvas.removeEventListener('webglcontextlost', lost),
+    );
+    canvas.addEventListener('webglcontextrestored', restored);
+    this.ownedReleases.push(() =>
+      canvas.removeEventListener('webglcontextrestored', restored),
+    );
+  }
+
   private readonly onResize = (): void => {
     try {
       this.resize();
@@ -601,7 +684,8 @@ export class GameHost {
   };
 
   private resize(): void {
-    if (!this.container || !this.renderer || !this.scene) return;
+    if (!this.container || !this.renderer || !this.scene || this.graphicsLost)
+      return;
     const { width, height, dpr } = (
       this.deps.measure ??
       ((element) => ({
@@ -651,6 +735,7 @@ export class GameHost {
     if (
       !event.defaultPrevented &&
       !this.settingsOpen &&
+      !this.graphicsLost &&
       isPauseKeyEvent(event) &&
       this.store.getState().screen === 'paused'
     ) {
@@ -668,13 +753,15 @@ export class GameHost {
   private scheduleFrame(): void {
     if (
       !this.disposed &&
+      !this.graphicsLost &&
       this.container &&
       this.scene &&
       this.frameId === null
     ) {
       const generation = this.generation;
       this.frameId = this.requestFrame((timestamp) => {
-        if (this.isCurrent(generation)) this.onFrame(timestamp);
+        if (this.isCurrent(generation) && !this.graphicsLost)
+          this.onFrame(timestamp);
       });
     }
   }
@@ -683,7 +770,14 @@ export class GameHost {
     this.frameId = null;
     const scene = this.scene;
     const renderer = this.renderer;
-    if (!scene || !renderer || !this.container || this.disposed) return;
+    if (
+      !scene ||
+      !renderer ||
+      !this.container ||
+      this.disposed ||
+      this.graphicsLost
+    )
+      return;
     try {
       const dt = Math.max(0, (timestamp - this.lastTime) / 1000);
       this.lastTime = timestamp;
@@ -835,6 +929,7 @@ export class GameHost {
     this.input = null;
     this.scene = null;
     this.renderer = null;
+    this.graphicsLost = false;
     this.hasSize = false;
     errors.push(
       ...releaseResources(this.surfaceReleases),
@@ -873,11 +968,16 @@ export class GameHost {
     this.retainConstruction(error);
     this.reportingError = true;
     this.generation += 1;
-    let detail = message(error);
+    let detail = errorDetail(error);
     try {
       this.cleanupCurrent();
     } catch (cleanupError) {
-      detail += ` ${message(cleanupError)} Cleanup remains owned; retry is required.`;
+      detail = errorDetail(
+        new AggregateError(
+          [error, cleanupError],
+          'Run failed and cleanup remains owned; retry is required.',
+        ),
+      );
     }
     try {
       if (!this.disposed)

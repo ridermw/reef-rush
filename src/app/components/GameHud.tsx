@@ -6,6 +6,7 @@ export interface GameHudProps {
   presentation: AppPresentation;
   onPause: () => void;
   pauseLabel?: string;
+  pauseDisabled?: boolean;
 }
 
 export function GameHud({
@@ -13,6 +14,7 @@ export function GameHud({
   presentation,
   onPause,
   pauseLabel = 'Pause run',
+  pauseDisabled = false,
 }: GameHudProps) {
   const dashPercent = Math.round(
     Math.max(0, Math.min(1, presentation.dashRatio)) * 100,
@@ -25,7 +27,12 @@ export function GameHud({
           <p className="eyebrow">Reef Rush</p>
           <h1 className="hud-course-name">{courseName}</h1>
         </div>
-        <button className="secondary-button" onClick={onPause} type="button">
+        <button
+          className="secondary-button"
+          disabled={pauseDisabled}
+          onClick={onPause}
+          type="button"
+        >
           {pauseLabel}
         </button>
       </header>

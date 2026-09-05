@@ -25,6 +25,7 @@ it.each([kelpworks, blacksmoker])(
       audio: createAudioEngine().getState(),
       feedback: null,
       screen: 'playing',
+      graphicsLost: false,
       player: {
         position: course.spawn.position,
         velocity: [0, 0, 0],

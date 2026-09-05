@@ -1,6 +1,8 @@
 export interface PauseScreenProps {
   courseName: string;
   onResume: () => void;
+  graphicsLost: boolean;
+  onRetryCourse: () => void;
   onSettings: () => void;
   onReturnToTitle: () => void;
 }
@@ -8,6 +10,8 @@ export interface PauseScreenProps {
 export function PauseScreen({
   courseName,
   onResume,
+  graphicsLost,
+  onRetryCourse,
   onSettings,
   onReturnToTitle,
 }: PauseScreenProps) {
@@ -16,10 +20,27 @@ export function PauseScreen({
       <p className="eyebrow">Run paused</p>
       <h2>{courseName}</h2>
       <p>Take a breath. The clock is still, and the reef will wait.</p>
+      {graphicsLost && (
+        <p>Retry restarts this attempt and preserves saved progress.</p>
+      )}
       <div className="button-row">
-        <button className="primary-button" onClick={onResume} type="button">
+        <button
+          className="primary-button"
+          disabled={graphicsLost}
+          onClick={onResume}
+          type="button"
+        >
           Resume
         </button>
+        {graphicsLost && (
+          <button
+            className="secondary-button"
+            onClick={onRetryCourse}
+            type="button"
+          >
+            Retry course
+          </button>
+        )}
         <button className="secondary-button" onClick={onSettings} type="button">
           Settings
         </button>

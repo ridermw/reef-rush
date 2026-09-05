@@ -1,6 +1,10 @@
 import { useState, useSyncExternalStore } from 'react';
 import { COURSES, COURSE_NAMES } from '../content/courses/courseIds';
-import type { AppPresentation, AppStore } from './appStore';
+import {
+  canRetryCourse,
+  type AppPresentation,
+  type AppStore,
+} from './appStore';
 import { screenUsesGameRoot } from './screens';
 import { CourseSelectScreen } from './components/CourseSelectScreen';
 import { ErrorScreen } from './components/ErrorScreen';
@@ -21,7 +25,10 @@ import { AudioNotice, type ShellAudio } from './components/AudioNotice';
 export interface AppProps {
   store: AppStore;
   settings?: SettingsStore;
-  host?: Pick<GameHost, 'setContainer' | 'setSettingsOpen' | 'settings'> &
+  host?: Pick<
+    GameHost,
+    'setContainer' | 'setSettingsOpen' | 'settings' | 'retryCourse'
+  > &
     ShellAudio;
 }
 
@@ -50,6 +57,10 @@ export function App({ store, host, settings }: AppProps) {
   function resume() {
     void host?.unlockAudio();
     store.dispatch({ type: 'RESUME' });
+  }
+  function retryCourse() {
+    if (host) host.retryCourse();
+    else store.dispatch({ type: 'RETRY_COURSE' });
   }
   const state = useSyncExternalStore(
     store.subscribe,
@@ -118,10 +129,13 @@ export function App({ store, host, settings }: AppProps) {
               onPause={resume}
               presentation={presentation}
               pauseLabel="Resume run"
+              pauseDisabled={state.graphicsLost}
             />
             <PauseScreen
               courseName={courseName ?? 'Current course'}
               onResume={resume}
+              graphicsLost={state.graphicsLost}
+              onRetryCourse={retryCourse}
               onSettings={openSettings}
               onReturnToTitle={() =>
                 store.dispatch({ type: 'RETURN_TO_TITLE' })
@@ -157,6 +171,7 @@ export function App({ store, host, settings }: AppProps) {
               'This expedition could not continue. Return to title to try again.'
             }
             title={state.error?.title ?? 'Run unavailable'}
+            onRetryCourse={canRetryCourse(state) ? retryCourse : undefined}
             onReturnToTitle={() => store.dispatch({ type: 'RETURN_TO_TITLE' })}
           />
         );
@@ -173,6 +188,12 @@ export function App({ store, host, settings }: AppProps) {
   const notices = (
     <>
       {progressNotice}
+      {state.graphicsLost && (
+        <p className="service-notice" role="status">
+          Graphics interrupted. Waiting for graphics to be restored; your run
+          and saved progress are retained. Restoration will not resume play.
+        </p>
+      )}
       {!settingsOpen && preferencesState.notice && (
         <p className="service-notice" role="alert">
           {preferencesState.notice}

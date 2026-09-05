@@ -54,6 +54,128 @@ function expectGameRoot(expected: 'present' | 'absent'): void {
   }
 }
 
+describe('graphics recovery shell', () => {
+  it('shows conditional WebGL guidance and only offers course retry for a selected course error', async () => {
+    const user = userEvent.setup();
+    const store = createAppStore();
+    store.dispatch({
+      type: 'SHOW_ERROR',
+      title: 'Run unavailable',
+      detail: 'Network disconnected.',
+    });
+    render(<App store={store} />);
+    expect(screen.getByText('Network disconnected.')).toBeVisible();
+    expect(
+      screen.getByText(
+        /if.*graphics.*WebGL 2.*current desktop browser.*hardware acceleration/i,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Retry course' }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Return to title' }));
+    await user.click(screen.getByRole('button', { name: 'Dive in' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Load Sunlit Shoals' }),
+    );
+    act(() =>
+      store.dispatch({
+        type: 'SHOW_ERROR',
+        title: 'Run unavailable',
+        detail: 'Error creating WebGL context.',
+      }),
+    );
+    expect(screen.getByText(/restart.*attempt.*saved progress/i)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Retry course' }));
+    expect(store.getState()).toMatchObject({
+      screen: 'loading',
+      selectedCourseId: 'sunlit-shoals',
+    });
+  });
+
+  it('disables every resume button while lost, keeps settings usable and routes retry through the host', async () => {
+    const user = userEvent.setup();
+    const store = createAppStore();
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    const audio = createAudioEngine();
+    const retryCourse = vi.fn(() => store.dispatch({ type: 'RETRY_COURSE' }));
+    const unlockAudio = vi.fn(() => audio.unlock());
+    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+    store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+    store.dispatch({ type: 'COURSE_READY' });
+    store.dispatch({ type: 'GRAPHICS_LOST' });
+    store.dispatch({
+      type: 'PROGRESS_UPDATED',
+      progress: { version: 1, courses: {} },
+      notice: null,
+    });
+    const progress = store.getState().progress;
+    render(
+      <App
+        store={store}
+        settings={settings}
+        host={{
+          settings,
+          setContainer: () => {},
+          setSettingsOpen: () => {},
+          retryCourse,
+          unlockAudio,
+          getAudioNotice: () => null,
+          subscribeAudio: (listener) => audio.subscribe(listener),
+          retryAudioCleanup: () => audio.retryCleanup(),
+        }}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /graphics interrupted/i,
+    );
+    for (const name of ['Resume', 'Resume run']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      await user.click(button);
+    }
+    expect(unlockAudio).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Mouse steering' }));
+    await user.keyboard('[Escape]');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(store.getState()).toMatchObject({
+      screen: 'paused',
+      graphicsLost: true,
+    });
+    const retry = screen.getByRole('button', { name: 'Retry course' });
+    retry.focus();
+    await user.keyboard('[Enter]');
+    expect(retryCourse).toHaveBeenCalledOnce();
+    expect(store.getState().progress).toBe(progress);
+    expect(settings.getState().settings.mouseSteering).toBe(false);
+    expect(screen.queryByText(/graphics interrupted/i)).not.toBeInTheDocument();
+    await audio.dispose();
+  });
+
+  it('clears the interruption notice on restoration but still requires an explicit resume', async () => {
+    const user = userEvent.setup();
+    const store = createAppStore();
+    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+    store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+    store.dispatch({ type: 'COURSE_READY' });
+    store.dispatch({ type: 'GRAPHICS_LOST' });
+    render(<App store={store} />);
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+    act(() => store.dispatch({ type: 'GRAPHICS_RESTORED' }));
+    expect(store.getState().screen).toBe('paused');
+    expect(screen.queryByText(/graphics interrupted/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry course' }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(store.getState().screen).toBe('playing');
+  });
+});
+
 describe('App shell', () => {
   it('offers expedition copy, never generated/prototype jargon, and no external artwork', () => {
     const view = render(<App store={createAppStore()} />);
@@ -175,6 +297,7 @@ describe('App shell', () => {
             settings,
             setContainer: () => {},
             setSettingsOpen,
+            retryCourse: host.retryCourse,
             unlockAudio: host.unlockAudio,
             getAudioNotice: host.getAudioNotice,
             subscribeAudio: host.subscribeAudio,
@@ -256,6 +379,7 @@ describe('App shell', () => {
           settings,
           setContainer: () => {},
           setSettingsOpen: host.setSettingsOpen,
+          retryCourse: host.retryCourse,
           unlockAudio: unlock,
           getAudioNotice: host.getAudioNotice,
           subscribeAudio: host.subscribeAudio,

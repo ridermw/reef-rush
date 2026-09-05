@@ -24,6 +24,7 @@ export interface AppPresentation {
 
 export interface AppState {
   screen: AppScreen;
+  graphicsLost: boolean;
   selectedCourseId: CourseId | null;
   presentation: AppPresentation | null;
   result: FinishedRaceResult | null;
