@@ -7,6 +7,7 @@ import { RaceSession } from '../../src/game/race/RaceSession';
 import { DEFAULT_SETTINGS } from '../../src/settings/settings';
 import { driveSunlit } from '../browser/acceptance-helpers';
 import type { KeyboardObservation } from '../fixtures/courseKeyboardPolicy';
+import { deferred } from '../fixtures/originalAssets';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -65,6 +66,24 @@ function snapshot({ fish, steps }: KeyboardObservation): HostSnapshot {
   };
 }
 
+function nativePage(
+  evaluate: Page['evaluate'],
+  down: Page['keyboard']['down'],
+  up: Page['keyboard']['up'],
+) {
+  const page: Pick<Page, 'evaluate' | 'keyboard'> = {
+    evaluate,
+    keyboard: {
+      down,
+      up,
+      insertText: vi.fn(),
+      press: vi.fn(),
+      type: vi.fn(),
+    },
+  };
+  return page as Page;
+}
+
 it('releases pitch instead of commanding an upward overshoot after the recorded native observation gap', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
   const held = new Set<string>();
@@ -91,22 +110,135 @@ it('releases pitch instead of commanding an upward overshoot after the recorded 
     }
     return Promise.reject(stop);
   });
-  const page: Pick<Page, 'evaluate' | 'keyboard'> = {
-    evaluate,
-    keyboard: {
-      down,
-      up,
-      insertText: vi.fn(),
-      press: vi.fn(),
-      type: vi.fn(),
-    },
-  };
-
-  await expect(driveSunlit(page as Page)).rejects.toBe(stop);
+  await expect(driveSunlit(nativePage(evaluate, down, up))).rejects.toBe(stop);
 
   expect(applied).toHaveLength(2);
   expect(applied[0]).toContain('ArrowDown');
   expect(applied[1]).not.toContain('ArrowUp');
   expect(applied[1]).not.toContain('ArrowDown');
   expect(held.size).toBe(0);
+});
+
+it('batches the initial native key edges without serial round trips', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const gate = deferred<void>();
+  const stop = new Error('Observed the applied keys');
+  const down = vi.fn<Page['keyboard']['down']>(() => gate.promise);
+  const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockRejectedValue(stop);
+  const completed = driveSunlit(nativePage(evaluate, down, up)).catch(
+    (error: unknown) => error,
+  );
+  try {
+    await vi.waitFor(() => expect(down).toHaveBeenCalledTimes(4));
+    expect(down.mock.calls).toEqual([['d'], ['ArrowDown'], ['w'], ['Shift']]);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  } finally {
+    gate.resolve();
+    expect(await completed).toBe(stop);
+  }
+  expect(up.mock.calls).toEqual(down.mock.calls);
+});
+
+it('settles every release before sending the next native key set', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const gate = deferred<void>();
+  const stop = new Error('Observed the replacement keys');
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
+  const up = vi.fn<Page['keyboard']['up']>((key) =>
+    key === 's' ? Promise.resolve() : gate.promise,
+  );
+  const next = snapshot({
+    steps: 1600,
+    fish: {
+      ...observations[1].fish,
+      position: [-4, -5, 59],
+      velocity: [0, 0, 5],
+      yaw: 0,
+      pitch: 0,
+    },
+  });
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockResolvedValueOnce({ state: next, hud: ['0:26.66', '2 / 4', '2'] })
+    .mockRejectedValue(stop);
+  const completed = driveSunlit(nativePage(evaluate, down, up)).catch(
+    (error: unknown) => error,
+  );
+  try {
+    await vi.waitFor(() => expect(up).toHaveBeenCalledTimes(4));
+    expect(down).not.toHaveBeenCalledWith('s');
+    expect(evaluate).toHaveBeenCalledTimes(2);
+  } finally {
+    gate.resolve();
+    expect(await completed).toBe(stop);
+  }
+  expect(down).toHaveBeenLastCalledWith('s');
+  expect(up).toHaveBeenLastCalledWith('s');
+});
+
+it('settles failed press batches before releasing every possibly delivered key', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const gate = deferred<void>();
+  const failure = new Error('Native press acknowledgement failed');
+  const down = vi.fn<Page['keyboard']['down']>((key) =>
+    key === 'd' ? Promise.reject(failure) : gate.promise,
+  );
+  const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValue(snapshot(observations[0]));
+  let finished = false;
+  const completed = driveSunlit(nativePage(evaluate, down, up)).catch(
+    (error: unknown) => {
+      finished = true;
+      return error;
+    },
+  );
+  try {
+    await vi.waitFor(() => expect(down).toHaveBeenCalledTimes(4));
+    expect(finished).toBe(false);
+    expect(up).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+    await completed;
+  }
+  expect(await completed).toMatchObject({
+    name: 'AggregateError',
+    errors: [failure],
+  });
+  expect(up.mock.calls).toEqual(down.mock.calls);
+  expect(evaluate).toHaveBeenCalledTimes(1);
+});
+
+it('attempts every cleanup edge and preserves both driver and release failures', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const pressFailure = new Error('Press acknowledgement failed');
+  const releaseFailure = new Error('Release acknowledgement failed');
+  const down = vi.fn<Page['keyboard']['down']>((key) =>
+    key === 'd' ? Promise.reject(pressFailure) : Promise.resolve(),
+  );
+  const up = vi.fn<Page['keyboard']['up']>((key) =>
+    key === 'd' ? Promise.reject(releaseFailure) : Promise.resolve(),
+  );
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValue(snapshot(observations[0]));
+
+  const failure: unknown = await driveSunlit(
+    nativePage(evaluate, down, up),
+  ).catch((error: unknown) => error);
+
+  expect(up.mock.calls).toEqual(down.mock.calls);
+  expect(failure).toMatchObject({
+    name: 'AggregateError',
+    errors: [
+      { name: 'AggregateError', errors: [pressFailure] },
+      { name: 'AggregateError', errors: [releaseFailure] },
+    ],
+  });
 });

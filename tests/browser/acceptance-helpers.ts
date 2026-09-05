@@ -10,6 +10,7 @@ import {
   courseKeyboardPolicy,
   type KeyboardObservation,
 } from '../fixtures/courseKeyboardPolicy';
+import { releaseNativeKeys, setNativeKeys } from '../fixtures/nativeKeyboard';
 
 export const progressKey = 'reef-rush.progress';
 
@@ -147,6 +148,7 @@ export async function driveSunlit(page: Page) {
   let approachingCheckpoint = false;
   let nextRecoveryLog = 0;
   let previous: KeyboardObservation | undefined;
+  let failure: { error: unknown } | undefined;
   let state = await snapshot(page);
   const deadline = Date.now() + 120_000;
   try {
@@ -205,18 +207,7 @@ export async function driveSunlit(page: Page) {
       });
       previous = keyboardObservation;
       const keys = new Set<string>(decision.keys);
-      for (const key of held) {
-        if (!keys.has(key)) {
-          await page.keyboard.up(key);
-          held.delete(key);
-        }
-      }
-      for (const key of keys) {
-        if (!held.has(key)) {
-          await page.keyboard.down(key);
-          held.add(key);
-        }
-      }
+      await setNativeKeys(page.keyboard, held, keys);
       const observed = await page.evaluate(
         (previous) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
@@ -245,8 +236,11 @@ export async function driveSunlit(page: Page) {
           hudPearls.add(state.race.pearlCount);
       }
     }
+  } catch (error) {
+    failure = { error };
+    throw error;
   } finally {
-    for (const key of held) await page.keyboard.up(key);
+    await releaseNativeKeys(page.keyboard, held, failure);
   }
   if (state.race?.checkpointIndex !== checkpoints.at(-1))
     checkpoints.push(state.race?.checkpointIndex ?? -1);

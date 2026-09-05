@@ -13,6 +13,7 @@ import {
   type CourseKey,
   type KeyboardObservation,
 } from './courseKeyboardPolicy';
+import { releaseNativeKeys, setNativeKeys } from './nativeKeyboard';
 
 // Binary native keys, not the normalized fixed-step controller. The authored
 // policy advances only on observed checkpoint crossings and actual pearl IDs.
@@ -38,6 +39,7 @@ export async function driveCourseByKeyboard(
   let approachingCheckpoint = false;
   let capturedCheckpoint = 0;
   let previous: KeyboardObservation | undefined;
+  let failure: { error: unknown } | undefined;
   const keyPolicy: Array<
     KeyboardObservation &
       ReturnType<typeof courseKeyboardPolicy> & {
@@ -134,18 +136,7 @@ export async function driveCourseByKeyboard(
       });
       previous = observation;
       const keys = new Set(decision.keys);
-      for (const key of held) {
-        if (!keys.has(key)) {
-          await page.keyboard.up(key);
-          held.delete(key);
-        }
-      }
-      for (const key of keys) {
-        if (!held.has(key)) {
-          await page.keyboard.down(key);
-          held.add(key);
-        }
-      }
+      await setNativeKeys(page.keyboard, held, keys);
       const nextFrame = await page.evaluate(
         ({ previous, courseId }) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
@@ -185,18 +176,24 @@ export async function driveCourseByKeyboard(
       }
     }
     observe(state);
+  } catch (error) {
+    failure = { error };
+    throw error;
   } finally {
-    for (const key of held) await page.keyboard.up(key);
-    console.info(
-      `Native ${course.courseId} observation: ${JSON.stringify({
-        waypoint,
-        steps: state.frame.steps - initialSteps,
-        wallMs: Date.now() - started,
-        milestones,
-        recoveries: [...recoveries],
-        state,
-      })}`,
-    );
+    try {
+      await releaseNativeKeys(page.keyboard, held, failure);
+    } finally {
+      console.info(
+        `Native ${course.courseId} observation: ${JSON.stringify({
+          waypoint,
+          steps: state.frame.steps - initialSteps,
+          wallMs: Date.now() - started,
+          milestones,
+          recoveries: [...recoveries],
+          state,
+        })}`,
+      );
+    }
   }
   expect(state.screen, JSON.stringify({ waypoint, state, milestones })).toBe(
     'results',

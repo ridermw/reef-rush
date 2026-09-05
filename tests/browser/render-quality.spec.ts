@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type ElementHandle, type Page } from '@playwright/test';
 import {
   expectDraw,
   expectIdle,
@@ -38,10 +38,12 @@ async function seed(page: Page) {
   );
 }
 
-async function dimensions(page: Page) {
-  return page
-    .locator('#game-root canvas')
-    .evaluate((canvas: HTMLCanvasElement) => {
+async function dimensions(
+  page: Page,
+  original?: ElementHandle<SVGElement | HTMLElement>,
+) {
+  return page.locator('#game-root canvas').evaluate(
+    (canvas: HTMLCanvasElement, { original, progressKey }) => {
       const rect = canvas.getBoundingClientRect();
       const gl = canvas.getContext('webgl2');
       if (!gl) throw new Error('Native WebGL2 context missing.');
@@ -61,8 +63,12 @@ async function dimensions(page: Page) {
           height: shell.clientHeight,
           fontSize: getComputedStyle(shell).fontSize,
         },
+        sameCanvas: original ? canvas === original : null,
+        progress: localStorage.getItem(progressKey),
       };
-    });
+    },
+    { original, progressKey },
+  );
 }
 
 async function openSettings(page: Page) {
@@ -128,8 +134,8 @@ for (const dpr of [1, 2]) {
           ['low', 0.5],
         ] as const) {
           await quality.selectOption(preset);
-          await frames(page);
-          const measured = await dimensions(page);
+          const current = await frames(page);
+          const measured = await dimensions(page, original);
           const expected = {
             width: Math.floor(high.client.width * Math.min(2, dpr) * scale),
             height: Math.floor(high.client.height * Math.min(2, dpr) * scale),
@@ -142,23 +148,13 @@ for (const dpr of [1, 2]) {
           const pixels = measured.buffer.width * measured.buffer.height;
           const proportion = pixels / (high.buffer.width * high.buffer.height);
           expect(proportion).toBeCloseTo(scale * scale, 2);
-          const current = await snapshot(page);
           expect(current.player).toEqual(paused.player);
           expect(current.race).toEqual(paused.race);
           expect(current.frame.steps).toBe(paused.frame.steps);
           expect(current.resources).toEqual(paused.resources);
           expect(current.preferences.reducedMotion).toBe(true);
-          expect(
-            await page
-              .locator('#game-root canvas')
-              .evaluate((canvas, original) => canvas === original, original),
-          ).toBe(true);
-          expect(
-            await page.evaluate(
-              (key) => localStorage.getItem(key),
-              progressKey,
-            ),
-          ).toBe(progressRaw);
+          expect(measured.sameCanvas).toBe(true);
+          expect(measured.progress).toBe(progressRaw);
           const draw = await expectDraw(page);
           measurements.push({
             preset,
