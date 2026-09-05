@@ -9,9 +9,12 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { PauseScreen } from './components/PauseScreen';
 import { ResultsScreen } from './components/ResultsScreen';
 import { TitleScreen } from './components/TitleScreen';
+import { unlockedCourseIds } from '../game/progression/progress';
+import type { GameHost } from '../game/core/GameHost';
 
 export interface AppProps {
   store: AppStore;
+  host?: Pick<GameHost, 'setContainer'>;
 }
 
 const fallbackPresentation: AppPresentation = {
@@ -22,7 +25,7 @@ const fallbackPresentation: AppPresentation = {
   pearlCount: 0,
 };
 
-export function App({ store }: AppProps) {
+export function App({ store, host }: AppProps) {
   const state = useSyncExternalStore(
     store.subscribe,
     store.getState,
@@ -32,6 +35,11 @@ export function App({ store }: AppProps) {
     ? COURSE_NAMES[state.selectedCourseId]
     : null;
   const presentation = state.presentation ?? fallbackPresentation;
+  const progressNotice = state.progressNotice ? (
+    <p className="progress-notice" role="status">
+      {state.progressNotice}
+    </p>
+  ) : null;
 
   const content = (() => {
     switch (state.screen) {
@@ -46,6 +54,11 @@ export function App({ store }: AppProps) {
         return (
           <CourseSelectScreen
             courses={COURSES}
+            unlockedCourseIds={
+              state.progress
+                ? unlockedCourseIds(state.progress)
+                : ['sunlit-shoals']
+            }
             onBack={() => store.dispatch({ type: 'RETURN_TO_TITLE' })}
             onSelectCourse={(courseId) =>
               store.dispatch({ type: 'LOAD_COURSE', courseId })
@@ -55,7 +68,10 @@ export function App({ store }: AppProps) {
 
       case 'loading':
         return (
-          <LoadingScreen courseName={courseName ?? 'the next Reef Rush run'} />
+          <LoadingScreen
+            courseName={courseName ?? 'the next Reef Rush run'}
+            onCancel={() => store.dispatch({ type: 'RETURN_TO_TITLE' })}
+          />
         );
 
       case 'playing':
@@ -87,10 +103,12 @@ export function App({ store }: AppProps) {
         );
 
       case 'results':
+        if (!state.result)
+          throw new Error('Results screen requires a finished race result.');
         return (
           <ResultsScreen
             courseName={courseName ?? 'Completed course'}
-            elapsedMs={state.result?.elapsedMs ?? presentation.elapsedMs}
+            result={state.result}
             onReturnToTitle={() => store.dispatch({ type: 'RETURN_TO_TITLE' })}
           />
         );
@@ -114,12 +132,21 @@ export function App({ store }: AppProps) {
             aria-label="Gameplay render surface"
             className="game-root"
             id="game-root"
+            ref={host?.setContainer}
           />
-          <div className="runtime-overlay">{content}</div>
+          <div className="runtime-overlay">
+            {content}
+            {progressNotice}
+          </div>
         </div>
       </div>
     );
   }
 
-  return <div className="app-shell">{content}</div>;
+  return (
+    <div className="app-shell">
+      {content}
+      {progressNotice}
+    </div>
+  );
 }

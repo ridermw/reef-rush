@@ -1,3 +1,5 @@
+import type { FinishedRaceResult } from '../../game/race/raceTypes';
+
 function formatElapsedMs(elapsedMs: number): string {
   const totalSeconds = Math.floor(elapsedMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -11,23 +13,23 @@ function formatElapsedMs(elapsedMs: number): string {
 
 export interface ResultsScreenProps {
   courseName: string;
-  elapsedMs: number;
+  result: FinishedRaceResult;
   onReturnToTitle: () => void;
 }
 
 export function ResultsScreen({
   courseName,
-  elapsedMs,
+  result,
   onReturnToTitle,
 }: ResultsScreenProps) {
   return (
     <section className="overlay-card overlay-card--modal">
       <p className="eyebrow">Run complete</p>
       <h2>{courseName}</h2>
-      <p className="results-time">{formatElapsedMs(elapsedMs)}</p>
+      <p className="results-time">{formatElapsedMs(result.elapsedMs)}</p>
+      <p>{result.medal ? `${result.medal} medal` : 'No medal this run'}</p>
       <p>
-        Results stay in the shell while the dedicated render surface remains in
-        place for post-run transitions and later replay hooks.
+        {result.pearlCount} / {result.totalPearls} pearls
       </p>
       <button
         className="primary-button"

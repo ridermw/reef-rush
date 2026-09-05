@@ -1,5 +1,10 @@
 import type { CourseId } from '../content/courses/courseIds';
 import type { AppPresentation, AppState } from './screens';
+import {
+  finishedRaceResultSchema,
+  type FinishedRaceResult,
+} from '../game/race/raceTypes';
+import type { Progress } from '../game/progression/progress';
 
 export type { CourseId } from '../content/courses/courseIds';
 export type { AppPresentation, AppScreen, AppState } from './screens';
@@ -11,7 +16,8 @@ export type AppAction =
   | { type: 'PRESENTATION_UPDATED'; presentation: AppPresentation }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
-  | { type: 'RUN_FINISHED'; elapsedMs: number }
+  | { type: 'RUN_FINISHED'; result: FinishedRaceResult }
+  | { type: 'PROGRESS_UPDATED'; progress: Progress; notice: string | null }
   | { type: 'SHOW_ERROR'; title: string; detail: string }
   | { type: 'RETURN_TO_TITLE' };
 
@@ -28,6 +34,8 @@ function createInitialState(): AppState {
     presentation: null,
     result: null,
     error: null,
+    progress: null,
+    progressNotice: null,
   };
 }
 
@@ -67,6 +75,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
     case 'LOAD_COURSE':
       assertScreen(action.type, state.screen, ['course-select']);
       return {
+        ...state,
         screen: 'loading',
         selectedCourseId: action.courseId,
         presentation: null,
@@ -107,10 +116,20 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
 
     case 'RUN_FINISHED':
       assertScreen(action.type, state.screen, ['playing']);
+      if (action.result.courseId !== state.selectedCourseId) {
+        throw new Error('Finished result does not match the selected course.');
+      }
       return {
         ...state,
         screen: 'results',
-        result: { elapsedMs: action.elapsedMs },
+        result: finishedRaceResultSchema.parse(action.result),
+      };
+
+    case 'PROGRESS_UPDATED':
+      return {
+        ...state,
+        progress: action.progress,
+        progressNotice: action.notice,
       };
 
     case 'SHOW_ERROR':
@@ -134,7 +153,11 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
         'results',
         'error',
       ]);
-      return createInitialState();
+      return {
+        ...createInitialState(),
+        progress: state.progress,
+        progressNotice: state.progressNotice,
+      };
   }
 }
 

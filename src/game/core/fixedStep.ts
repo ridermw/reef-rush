@@ -6,26 +6,34 @@ export interface FixedStepResult {
 
 export class FixedStepRunner {
   private accumulatorSeconds = 0;
+  private resetVersion = 0;
 
   constructor(
     private readonly stepSeconds = 1 / 60,
     private readonly maxFrameSeconds = 0.1,
     private readonly maxSteps = 5,
   ) {
-    if (stepSeconds <= 0) {
+    if (!Number.isFinite(stepSeconds) || stepSeconds <= 0) {
       throw new Error('stepSeconds must be positive');
     }
 
-    if (maxFrameSeconds <= 0) {
+    if (!Number.isFinite(maxFrameSeconds) || maxFrameSeconds <= 0) {
       throw new Error('maxFrameSeconds must be positive');
     }
 
-    if (maxSteps <= 0) {
-      throw new Error('maxSteps must be positive');
+    if (!Number.isSafeInteger(maxSteps) || maxSteps <= 0) {
+      throw new Error('maxSteps must be a positive safe integer');
     }
   }
 
-  advance(frameSeconds: number, step: (dt: number) => void): FixedStepResult {
+  advance(
+    frameSeconds: number,
+    step: (dt: number) => void | false,
+  ): FixedStepResult {
+    if (!Number.isFinite(frameSeconds)) {
+      throw new RangeError('frameSeconds must be finite');
+    }
+    const version = this.resetVersion;
     const positiveFrameSeconds = Math.max(frameSeconds, 0);
     const clampedFrameSeconds = Math.min(
       positiveFrameSeconds,
@@ -41,9 +49,13 @@ export class FixedStepRunner {
       steps < this.maxSteps &&
       this.accumulatorSeconds >= this.stepSeconds
     ) {
-      step(this.stepSeconds);
       this.accumulatorSeconds -= this.stepSeconds;
       steps += 1;
+      const keepGoing = step(this.stepSeconds);
+      if (keepGoing === false || version !== this.resetVersion) {
+        this.reset();
+        break;
+      }
     }
 
     if (
@@ -69,5 +81,6 @@ export class FixedStepRunner {
 
   reset(): void {
     this.accumulatorSeconds = 0;
+    this.resetVersion += 1;
   }
 }

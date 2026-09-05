@@ -2,24 +2,26 @@ import type { CourseId, CourseSummary } from '../../content/courses/courseIds';
 
 export interface CourseSelectScreenProps {
   courses: readonly CourseSummary[];
+  unlockedCourseIds: readonly CourseId[];
   onBack: () => void;
   onSelectCourse: (courseId: CourseId) => void;
 }
 
 export function CourseSelectScreen({
   courses,
+  unlockedCourseIds,
   onBack,
   onSelectCourse,
 }: CourseSelectScreenProps) {
   return (
     <main className="screen screen--course-select">
       <section className="hero-panel hero-panel--compact">
-        <p className="eyebrow">Shell transition check</p>
+        <p className="eyebrow">Solo time trial</p>
         <div className="panel-heading">
           <h1>Choose a course</h1>
           <p>
-            Pick the next solo route. The shell loads the selected course while
-            the future game runtime remains isolated to the render surface.
+            Race through Sunlit Shoals. Earn a medal to unlock eligibility for
+            the next route as more courses become available.
           </p>
         </div>
       </section>
@@ -33,10 +35,15 @@ export function CourseSelectScreen({
             </div>
             <button
               className="primary-button"
+              disabled={
+                !course.available || !unlockedCourseIds.includes(course.id)
+              }
               onClick={() => onSelectCourse(course.id)}
               type="button"
             >
-              Load {course.name}
+              {course.available
+                ? `${unlockedCourseIds.includes(course.id) ? 'Load' : 'Locked:'} ${course.name}`
+                : `${course.name} - not yet available`}
             </button>
           </article>
         ))}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   emptyProgress,
+  mergeProgress,
   parseProgress,
   progressSchema,
   unlockedCourseIds,
@@ -24,6 +25,106 @@ const best = {
   bestPearlCount: result.pearlCount,
 };
 const progress = { version: 1, courses: { 'sunlit-shoals': best } };
+
+describe('monotonic progress reconciliation', () => {
+  const other = {
+    version: 1,
+    courses: {
+      'sunlit-shoals': {
+        bestElapsedMs: 1000,
+        bestMedal: 'bronze',
+        bestPearlCount: 4,
+      },
+      kelpworks: best,
+    },
+  };
+
+  it('unions every course and retains each best field independently', () => {
+    const source = {
+      ...progress,
+      courses: { ...progress.courses, 'blacksmoker-run': best },
+    };
+    expect(mergeProgress(source, other)).toEqual({
+      version: 1,
+      courses: {
+        'sunlit-shoals': {
+          bestElapsedMs: 1000,
+          bestMedal: 'silver',
+          bestPearlCount: 4,
+        },
+        kelpworks: best,
+        'blacksmoker-run': best,
+      },
+    });
+  });
+
+  it('is commutative, associative and idempotent, including empty records', () => {
+    const third = updateProgress(emptyProgress(), {
+      ...result,
+      medal: 'gold',
+      pearlCount: 0,
+    });
+    expect(mergeProgress(progress, other)).toEqual(
+      mergeProgress(other, progress),
+    );
+    expect(mergeProgress(mergeProgress(progress, other), third)).toEqual(
+      mergeProgress(progress, mergeProgress(other, third)),
+    );
+    expect(mergeProgress(progress, progress)).toEqual(progress);
+    expect(mergeProgress(emptyProgress(), progress)).toEqual(progress);
+  });
+
+  it('returns a validated deep immutable copy without freezing or changing inputs', () => {
+    const source = structuredClone(other);
+    const merged = mergeProgress(progress, source);
+    source.courses.kelpworks.bestPearlCount = 0;
+    expect(merged.courses.kelpworks).toEqual(best);
+    expect(Object.isFrozen(source.courses)).toBe(false);
+    expect(Object.isFrozen(merged)).toBe(true);
+    expect(Object.isFrozen(merged.courses)).toBe(true);
+    for (const record of Object.values(merged.courses))
+      expect(Object.isFrozen(record)).toBe(true);
+    expect(parseProgress(merged)).toEqual(merged);
+    expect(progress.courses['sunlit-shoals']).toEqual(best);
+  });
+
+  it('rejects invalid records on either side instead of sanitizing or dropping them', () => {
+    expect(mergeProgress(progress, progress)).toEqual(progress);
+    for (const invalid of [
+      null,
+      { ...progress, version: 2 },
+      { version: 1, courses: { unknown: best } },
+      { version: 1, courses: { kelpworks: { ...best, bestElapsedMs: NaN } } },
+      { version: 1, courses: { kelpworks: { ...best, bestPearlCount: -1 } } },
+      {
+        version: 1,
+        courses: { kelpworks: { ...best, bestMedal: 'platinum' } },
+      },
+    ]) {
+      expect(() => mergeProgress(invalid, progress)).toThrow();
+      expect(() => mergeProgress(progress, invalid)).toThrow();
+    }
+  });
+
+  it.each([null, 'bronze', 'silver', 'gold'] as const)(
+    'preserves the better medal against %s independently of time and pearls',
+    (medal) => {
+      const medals = [null, 'bronze', 'silver', 'gold'] as const;
+      for (const candidate of medals) {
+        const left = updateProgress(emptyProgress(), { ...result, medal });
+        const right = updateProgress(emptyProgress(), {
+          ...result,
+          medal: candidate,
+        });
+        expect(
+          mergeProgress(left, right).courses['sunlit-shoals']?.bestMedal,
+        ).toBe(
+          medals[Math.max(medals.indexOf(medal), medals.indexOf(candidate))],
+        );
+      }
+    },
+  );
+});
 
 describe('strict immutable v1 progression', () => {
   it('creates isolated frozen empty progress without additional persisted fields', () => {

@@ -1,9 +1,13 @@
 const controls = [
-  { input: 'WASD / Arrow keys', action: 'Steer and pitch through the course' },
-  { input: 'Space', action: 'Trigger boost pickups' },
+  { input: 'W / S', action: 'Throttle: increase / reduce forward speed' },
+  { input: 'A / D or Left / Right', action: 'Steer horizontally' },
+  {
+    input: 'Up / Down or mouse',
+    action: 'Pitch; mouse also steers horizontally',
+  },
+  { input: 'Space', action: 'Dash using boost reserve' },
   { input: 'Left Shift', action: 'Feather speed for tight corners' },
-  { input: 'R', action: 'Restart the current run' },
-  { input: 'Esc', action: 'Pause' },
+  { input: 'Esc', action: 'Pause / resume' },
 ];
 
 export interface TitleScreenProps {
@@ -21,8 +25,8 @@ export function TitleScreen({ onDiveIn }: TitleScreenProps) {
             <h1 className="wordmark">Reef Rush</h1>
           </div>
           <p className="hero-pitch">
-            Chase flawless underwater racing lines across handcrafted solo
-            courses built for fast restarts and confident improvement.
+            Chase underwater racing lines through generated Sunlit Shoals. Pass
+            every checkpoint, collect pearls, and race for a medal.
           </p>
         </div>
         <div className="hero-actions">
@@ -30,7 +34,7 @@ export function TitleScreen({ onDiveIn }: TitleScreenProps) {
             Dive in
           </button>
           <p className="hero-meta">
-            Static shell today, frame-by-frame game runtime to follow.
+            Desktop keyboard and mouse. More courses are in development.
           </p>
         </div>
       </section>
@@ -39,8 +43,8 @@ export function TitleScreen({ onDiveIn }: TitleScreenProps) {
         <div className="panel-heading">
           <h2 id="controls-heading">Controls at a glance</h2>
           <p>
-            Keep the shell focused on launch flow, readability, and fast
-            retries.
+            Move the pointer over the water to steer. Leaving the window pauses
+            the run.
           </p>
         </div>
         <dl className="controls-grid">

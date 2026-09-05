@@ -49,34 +49,48 @@ export function parseProgress(input: unknown): Progress {
   return progressSchema.parse(input);
 }
 
+export function mergeProgress(left: unknown, right: unknown): Progress {
+  const current = parseProgress(left);
+  const incoming = parseProgress(right);
+  const courses: Partial<Record<CourseId, CourseBest>> = { ...current.courses };
+  for (const id of COURSE_IDS) {
+    const next = incoming.courses[id];
+    if (!next) continue;
+    const previous = courses[id];
+    const previousMedal = previous?.bestMedal ?? null;
+    courses[id] = {
+      bestElapsedMs: Math.min(
+        previous?.bestElapsedMs ?? next.bestElapsedMs,
+        next.bestElapsedMs,
+      ),
+      bestMedal:
+        next.bestMedal !== null &&
+        (previousMedal === null ||
+          medalRank[next.bestMedal] > medalRank[previousMedal])
+          ? next.bestMedal
+          : previousMedal,
+      bestPearlCount: Math.max(
+        previous?.bestPearlCount ?? 0,
+        next.bestPearlCount,
+      ),
+    };
+  }
+  return parseProgress({ version: 1, courses });
+}
+
 export function updateProgress(
   progress: unknown,
   finishedResult: unknown,
 ): Progress {
   const current = parseProgress(progress);
   const result = finishedRaceResultSchema.parse(finishedResult);
-  const previous = current.courses[result.courseId];
-  const previousMedal = previous?.bestMedal ?? null;
-  const bestMedal =
-    result.medal !== null &&
-    (previousMedal === null ||
-      medalRank[result.medal] > medalRank[previousMedal])
-      ? result.medal
-      : previousMedal;
-  return parseProgress({
+  return mergeProgress(current, {
     version: 1,
     courses: {
-      ...current.courses,
       [result.courseId]: {
-        bestElapsedMs: Math.min(
-          previous?.bestElapsedMs ?? result.elapsedMs,
-          result.elapsedMs,
-        ),
-        bestMedal,
-        bestPearlCount: Math.max(
-          previous?.bestPearlCount ?? 0,
-          result.pearlCount,
-        ),
+        bestElapsedMs: result.elapsedMs,
+        bestMedal: result.medal,
+        bestPearlCount: result.pearlCount,
       },
     },
   });

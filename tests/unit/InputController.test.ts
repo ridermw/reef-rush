@@ -174,3 +174,100 @@ it('removes every listener on destroy', () => {
     'pointermove',
   ]);
 });
+
+it('prevents scrolling only for playing controls outside interactive elements', () => {
+  let playing = true;
+  const controller = new InputController(window, { isPlaying: () => playing });
+  const key = (target: EventTarget, code: string) => {
+    const event = new KeyboardEvent('keydown', {
+      code,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const button = document.createElement('button');
+  const field = document.createElement('input');
+  document.body.append(button, field);
+  expect(key(window, 'ArrowDown')).toBe(true);
+  expect(key(window, 'KeyZ')).toBe(false);
+  expect(key(button, 'Space')).toBe(false);
+  expect(key(field, 'KeyW')).toBe(false);
+  expect(controller.readFrame()).toMatchObject({
+    dashPressed: false,
+    throttle: 0,
+  });
+  playing = false;
+  expect(key(window, 'Space')).toBe(false);
+  expect(controller.readFrame().dashPressed).toBe(false);
+  controller.destroy();
+  button.remove();
+  field.remove();
+});
+
+it('only steers from pointer movement on the owned canvas, not HUD controls', () => {
+  const canvas = document.createElement('canvas');
+  const button = document.createElement('button');
+  document.body.append(canvas, button);
+  const controller = new InputController(window, { pointerSurface: canvas });
+  function move(target: HTMLElement) {
+    const event = new PointerEvent('pointermove', { bubbles: true });
+    Object.defineProperties(event, {
+      movementX: { value: 100 },
+      movementY: { value: 20 },
+    });
+    target.dispatchEvent(event);
+  }
+  move(button);
+  expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+  move(canvas);
+  expect(controller.readFrame().steerX).toBeGreaterThan(0);
+  controller.destroy();
+  canvas.remove();
+  button.remove();
+});
+
+it.each(['button', 'role-button'])(
+  'accepts one Escape edge from a %s descendant without intercepting movement or activation',
+  (kind) => {
+    const controller = new InputController();
+    const button = document.createElement(kind === 'button' ? 'button' : 'div');
+    if (kind === 'role-button') button.setAttribute('role', 'button');
+    const child = document.createElement('span');
+    button.append(child);
+    document.body.append(button);
+    const press = (code: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', {
+        code,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      child.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    try {
+      expect(press('Space')).toBe(false);
+      expect(press('Enter')).toBe(false);
+      expect(press('KeyW')).toBe(false);
+      expect(press('ArrowDown')).toBe(false);
+      expect(press('Escape')).toBe(true);
+      expect(controller.readFrame()).toMatchObject({
+        pausePressed: true,
+        dashPressed: false,
+        throttle: 0,
+        steerY: 0,
+      });
+      expect(controller.readFrame().pausePressed).toBe(false);
+      press('Escape', { repeat: true });
+      press('Escape', { altKey: true });
+      press('Escape', { ctrlKey: true });
+      press('Escape', { metaKey: true });
+      expect(controller.readFrame().pausePressed).toBe(false);
+    } finally {
+      controller.destroy();
+      button.remove();
+    }
+  },
+);

@@ -32,7 +32,7 @@ export function GameHud({
     <section className="hud-shell" aria-label="Run heads-up display">
       <header className="hud-header">
         <div>
-          <p className="eyebrow">Live shell state</p>
+          <p className="eyebrow">Reef Rush</p>
           <h1 className="hud-course-name">{courseName}</h1>
         </div>
         <button className="secondary-button" onClick={onPause} type="button">

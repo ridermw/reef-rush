@@ -61,12 +61,26 @@ describe('app screen transitions', () => {
   it('runs title -> select -> loading -> playing -> results', () => {
     const store = createAppStore();
     advanceToPlaying(store);
-    store.dispatch({ type: 'RUN_FINISHED', elapsedMs: 91_250 });
+    store.dispatch({
+      type: 'RUN_FINISHED',
+      result: {
+        courseId: 'sunlit-shoals',
+        elapsedMs: 91_250,
+        medal: 'bronze',
+        pearlCount: 3,
+        totalPearls: 4,
+      },
+    });
 
     expect(store.getState()).toMatchObject({
       screen: 'results',
       selectedCourseId: 'sunlit-shoals',
-      result: { elapsedMs: 91_250 },
+      result: {
+        elapsedMs: 91_250,
+        medal: 'bronze',
+        pearlCount: 3,
+        totalPearls: 4,
+      },
     });
   });
 
@@ -119,6 +133,8 @@ describe('app screen transitions', () => {
       presentation: null,
       result: null,
       error: null,
+      progress: null,
+      progressNotice: null,
     });
   });
 
@@ -131,4 +147,41 @@ describe('app screen transitions', () => {
       expect(() => store.dispatch(action)).toThrow(error);
     },
   );
+
+  it('rejects a finished result for another course before changing state', () => {
+    const store = createAppStore();
+    advanceToPlaying(store);
+    const before = store.getState();
+    expect(() =>
+      store.dispatch({
+        type: 'RUN_FINISHED',
+        result: {
+          courseId: 'kelpworks',
+          elapsedMs: 12,
+          medal: 'gold',
+          pearlCount: 0,
+          totalPearls: 0,
+        },
+      }),
+    ).toThrow(/course/i);
+    expect(store.getState()).toBe(before);
+  });
+
+  it('keeps progress and its session-only notice across return to title', () => {
+    const store = createAppStore();
+    store.dispatch({
+      type: 'PROGRESS_UPDATED',
+      progress: { version: 1, courses: {} },
+      notice: 'Session only: storage unavailable.',
+    });
+    expect(store.getState()).toMatchObject({
+      progressNotice: 'Session only: storage unavailable.',
+    });
+    openCourseSelect(store);
+    store.dispatch({ type: 'RETURN_TO_TITLE' });
+    expect(store.getState()).toMatchObject({
+      progress: { version: 1, courses: {} },
+      progressNotice: 'Session only: storage unavailable.',
+    });
+  });
 });
