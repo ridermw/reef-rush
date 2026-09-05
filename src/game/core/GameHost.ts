@@ -42,6 +42,7 @@ import {
 import { createRunFeedback, type RunFeedback } from './runFeedback';
 import { finishAchievements } from '../progression/finishAchievements';
 import { renderPixelRatio } from '../rendering/renderQuality';
+import { createFrameMetrics, type FrameMetricsSnapshot } from './frameMetrics';
 
 export type HostRenderer = Pick<
   WebGLRenderer,
@@ -107,13 +108,48 @@ export interface HostSnapshot {
   readonly lifecycle:
     'idle' | 'loading' | 'active' | 'cleanup-pending' | 'disposed';
   readonly cleanupError: string | null;
-  readonly frame: Readonly<{ rendered: number; steps: number }>;
+  readonly frame: Readonly<{
+    rendered: number;
+    steps: number;
+    profiled: number;
+  }>;
   readonly resources: Readonly<{
     canvases: number;
     rafChains: number;
     pendingCleanup: number;
     scene: ReturnType<SceneRuntime['getDiagnostics']> | null;
   }>;
+}
+
+export interface HostDiagnostics {
+  readonly screen: AppScreen;
+  readonly lifecycle: HostSnapshot['lifecycle'];
+  readonly graphicsLost: boolean;
+  readonly selectedQuality: RenderQuality;
+  readonly backingPixels: Readonly<{ width: number; height: number }> | null;
+  readonly frame: HostSnapshot['frame'];
+  readonly frameMetrics: FrameMetricsSnapshot;
+  readonly resources: HostSnapshot['resources'];
+  readonly cleanup: Readonly<{
+    pendingReleases: number;
+    constructionOwners: number;
+    failed: boolean;
+    audioFailed: boolean;
+  }>;
+  readonly audio: Readonly<
+    Pick<
+      AudioSnapshot,
+      | 'status'
+      | 'phase'
+      | 'contextState'
+      | 'ownsContext'
+      | 'ownedNodes'
+      | 'activeEffects'
+      | 'activeAmbience'
+      | 'pendingUnlock'
+      | 'pendingCleanup'
+    >
+  >;
 }
 
 function frozenCopy<T>(value: T): T {
@@ -171,6 +207,8 @@ export class GameHost {
   private readonly constructionOwners = new Set<ConstructionCleanupError>();
   private lastCleanupError: unknown = null;
   private readonly runner = new FixedStepRunner();
+  private readonly frameMetrics = createFrameMetrics();
+  private metricsGeneration = 0;
   private readonly requestFrame;
   private readonly cancelFrame;
   private readonly now;
@@ -190,6 +228,7 @@ export class GameHost {
   private lastHudTime = 0;
   private rendered = 0;
   private steps = 0;
+  private profiled = 0;
   private hasSize = false;
   private renderQuality: RenderQuality;
   private progress: Progress;
@@ -352,6 +391,8 @@ export class GameHost {
     this.applyPresentationPreferences();
     if (settings.renderQuality !== this.renderQuality) {
       this.renderQuality = settings.renderQuality;
+      this.frameMetrics.reset();
+      this.metricsGeneration += 1;
       this.onResize();
     }
   };
@@ -519,7 +560,11 @@ export class GameHost {
         this.lastCleanupError === null
           ? null
           : errorDetail(this.lastCleanupError),
-      frame: { rendered: this.rendered, steps: this.steps },
+      frame: {
+        rendered: this.rendered,
+        steps: this.steps,
+        profiled: this.profiled,
+      },
       resources: {
         canvases: this.renderer?.domElement.parentElement ? 1 : 0,
         rafChains: this.frameId === null ? 0 : 1,
@@ -528,6 +573,67 @@ export class GameHost {
       },
     });
   }
+
+  /** Manual, local projection only: never traverse errors or expire run feedback. */
+  readonly getDiagnostics = (): HostDiagnostics => {
+    const audio = this.audio.getState();
+    const scene = this.scene?.getDiagnostics();
+    const canvas = this.renderer?.domElement;
+    return frozenCopy({
+      screen: this.store.getState().screen,
+      lifecycle: this.pendingReleases.length
+        ? 'cleanup-pending'
+        : this.disposed
+          ? 'disposed'
+          : this.scene
+            ? 'active'
+            : this.loading
+              ? 'loading'
+              : 'idle',
+      graphicsLost: this.graphicsLost,
+      selectedQuality: this.renderQuality,
+      backingPixels: canvas
+        ? { width: canvas.width, height: canvas.height }
+        : null,
+      frame: {
+        rendered: this.rendered,
+        steps: this.steps,
+        profiled: this.profiled,
+      },
+      frameMetrics: this.frameMetrics.getSnapshot(),
+      resources: {
+        canvases: canvas?.parentElement ? 1 : 0,
+        rafChains: this.frameId === null ? 0 : 1,
+        pendingCleanup: this.pendingReleases.length,
+        scene: scene
+          ? {
+              lifecycle: scene.lifecycle,
+              bodies: scene.bodies,
+              colliders: scene.colliders,
+              geometries: scene.geometries,
+              materials: scene.materials,
+            }
+          : null,
+      },
+      cleanup: {
+        pendingReleases: this.pendingReleases.length,
+        constructionOwners: this.constructionOwners.size,
+        failed: this.lastCleanupError !== null,
+        audioFailed: this.audioCleanupError !== null,
+      },
+      audio: {
+        status: audio.status,
+        phase: audio.phase,
+        contextState: audio.contextState,
+        ownsContext: audio.ownsContext,
+        ownedNodes: audio.ownedNodes,
+        activeEffects: audio.activeEffects,
+        activeAmbience: audio.activeAmbience,
+        pendingUnlock: audio.pendingUnlock,
+        pendingCleanup: audio.pendingCleanup,
+      },
+    });
+  };
 
   private readonly onStoreChange = (): void => {
     const state = this.store.getState();
@@ -664,6 +770,8 @@ export class GameHost {
       this.bindGraphicsEvents(renderer, scene);
       this.rendered = 0;
       this.steps = 0;
+      this.frameMetrics.reset();
+      this.metricsGeneration += 1;
       // Canvas focus during attachment must not erase a loss of window focus while loading.
       const startPaused =
         document.hidden ||
@@ -876,6 +984,8 @@ export class GameHost {
     this.frameId = null;
     const scene = this.scene;
     const renderer = this.renderer;
+    const generation = this.generation;
+    const metricsGeneration = this.metricsGeneration;
     if (
       !scene ||
       !renderer ||
@@ -887,8 +997,12 @@ export class GameHost {
     try {
       const dt = Math.max(0, (timestamp - this.lastTime) / 1000);
       this.lastTime = timestamp;
+      const startedPlaying = this.store.getState().screen === 'playing';
+      const canProfile = startedPlaying && !document.hidden && this.hasSize;
+      const workStarted = this.now();
       let alpha = 1;
-      if (this.store.getState().screen === 'playing') {
+      let droppedSeconds = 0;
+      if (startedPlaying) {
         const result = this.runner.advance(dt, (stepSeconds) => {
           if (!this.input)
             throw new Error('Playing runtime has no input owner.');
@@ -915,11 +1029,14 @@ export class GameHost {
           }
           if (
             this.scene !== scene ||
+            !this.isCurrent(generation) ||
+            this.graphicsLost ||
             this.store.getState().screen !== 'playing'
           )
             return false;
         });
         alpha = result.alpha;
+        droppedSeconds = result.droppedSeconds;
         if (
           this.store.getState().screen === 'playing' &&
           timestamp - this.lastHudTime >= 100
@@ -928,13 +1045,44 @@ export class GameHost {
           this.publishPresentation(scene.getSnapshot());
         }
       }
-      if (scene !== this.scene) return;
+      if (
+        scene !== this.scene ||
+        renderer !== this.renderer ||
+        !this.isCurrent(generation) ||
+        this.graphicsLost
+      )
+        return;
       if (this.hasSize) {
         scene.present(alpha, Math.min(dt, 0.1));
+        if (
+          scene !== this.scene ||
+          renderer !== this.renderer ||
+          !this.isCurrent(generation) ||
+          this.graphicsLost
+        )
+          return;
         renderer.render(scene.scene, scene.camera);
         this.rendered += 1;
+        if (
+          canProfile &&
+          this.store.getState().screen === 'playing' &&
+          scene === this.scene &&
+          renderer === this.renderer &&
+          this.isCurrent(generation) &&
+          !this.graphicsLost &&
+          !document.hidden &&
+          this.hasSize &&
+          metricsGeneration === this.metricsGeneration
+        ) {
+          this.frameMetrics.record(
+            dt * 1000,
+            this.now() - workStarted,
+            droppedSeconds * 1000,
+          );
+          this.profiled += 1;
+        }
       }
-      this.scheduleFrame();
+      if (this.isCurrent(generation)) this.scheduleFrame();
     } catch (error) {
       this.fail(error);
     }

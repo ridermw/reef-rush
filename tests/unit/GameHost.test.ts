@@ -30,6 +30,8 @@ import { FakeContext } from '../fixtures/audioContext';
 import { createSettingsStore } from '../../src/settings/SettingsStore';
 import { DEFAULT_SETTINGS } from '../../src/settings/settings';
 import { InputController } from '../../src/game/input/InputController';
+import * as frameMetricsModule from '../../src/game/core/frameMetrics';
+import * as feedbackModule from '../../src/game/core/runFeedback';
 
 const hosts: Array<Pick<GameHost, 'dispose' | 'retryCleanup'>> = [];
 const scenes: SceneRuntime[] = [];
@@ -749,6 +751,567 @@ describe('focus at asynchronous readiness', () => {
     ).toEqual(
       addDocument.mock.calls.filter(([type]) => type === 'visibilitychange'),
     );
+  });
+});
+
+describe('bounded host diagnostics', () => {
+  it('profiles only successful playing frames with runner input, actual dropped time and synchronous work', async () => {
+    let clock = 0;
+    const h = await setup({ now: () => clock });
+    await h.load();
+    const present = h.runtimes[0].present.bind(h.runtimes[0]);
+    vi.spyOn(h.runtimes[0], 'present').mockImplementation((...args) => {
+      clock += 2;
+      present(...args);
+    });
+    vi.mocked(h.renderer.render).mockImplementation(() => {
+      clock += 3;
+    });
+    const dispatch = vi.spyOn(h.store, 'dispatch');
+    h.frame(250);
+    const diagnostics = h.host.getDiagnostics();
+    expect(diagnostics.frame).toEqual({ rendered: 1, steps: 5, profiled: 1 });
+    expect(diagnostics.frameMetrics.sampleCount).toBe(1);
+    expect(diagnostics.frameMetrics.intervalMs).toEqual({
+      mean: 250,
+      p95: 250,
+      max: 250,
+    });
+    expect(diagnostics.frameMetrics.cpuWorkMs).toEqual({
+      mean: 5,
+      p95: 5,
+      max: 5,
+    });
+    expect(diagnostics.frameMetrics.droppedMs!.mean).toBeCloseTo(1000 / 6);
+    expect(diagnostics.frameMetrics.droppedSampleCount).toBe(1);
+    expect(dispatch.mock.calls.map(([action]) => action.type)).toEqual([
+      'PRESENTATION_UPDATED',
+    ]);
+    expect(h.host.getSnapshot().frame).toEqual(diagnostics.frame);
+  });
+
+  it('retains windows through pause/title/disposal, excludes paused wall time and resets only on fresh load or actual quality change', async () => {
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    const h = await setup({ settings });
+    await h.load();
+    h.frame(17);
+    const before = h.host.getDiagnostics();
+    h.store.dispatch({ type: 'PAUSE' });
+    h.frame(60_000);
+    expect(h.host.getDiagnostics().frameMetrics).toEqual(before.frameMetrics);
+    expect(h.host.getSnapshot().frame).toEqual({
+      rendered: 2,
+      steps: 1,
+      profiled: 1,
+    });
+    h.store.dispatch({ type: 'RESUME' });
+    h.frame(17);
+    expect(h.host.getDiagnostics().frameMetrics.intervalMs).toEqual({
+      mean: 17,
+      p95: 17,
+      max: 17,
+    });
+    settings.update({ renderQuality: 'high', masterVolume: 0.2 });
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(2);
+    settings.update({ renderQuality: 'low' });
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+    expect(h.host.getSnapshot().frame.profiled).toBe(2);
+    h.frame(0);
+    expect(h.host.getDiagnostics().frameMetrics.intervalMs?.mean).toBe(0);
+    h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(1);
+    await h.load();
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+    h.frame(17);
+    const retained = h.host.getDiagnostics().frameMetrics;
+    await h.host.dispose();
+    h.frame(17);
+    expect(h.host.getDiagnostics().frameMetrics).toEqual(retained);
+    expect(h.host.getDiagnostics().lifecycle).toBe('disposed');
+  });
+
+  describe('sampling exclusions preserve baseline runtime behavior', () => {
+    it.each(['zero-size', 'hidden'] as const)(
+      'continues simulation, HUD and input/pause consumption while %s, without profiling',
+      async (excluded) => {
+        const h = await setup();
+        await h.load();
+        h.frame(17);
+        const before = h.host.getDiagnostics().frameMetrics;
+        if (excluded === 'zero-size') h.resize({ width: 0, height: 0, dpr: 1 });
+        else vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+        // A queued hidden callback is not itself a visibilitychange event.
+        const step = vi.spyOn(h.runtimes[0], 'step');
+        const dispatch = vi.spyOn(h.store, 'dispatch');
+        key('KeyW');
+        key('Space');
+        h.frame(100);
+        expect(step).toHaveBeenCalledTimes(5);
+        expect(step.mock.calls.map(([input]) => input.dashPressed)).toEqual([
+          true,
+          false,
+          false,
+          false,
+          false,
+        ]);
+        expect(
+          step.mock.calls.every(
+            ([input, dt]) => input.throttle === 1 && dt === 1 / 60,
+          ),
+        ).toBe(true);
+        expect(h.store.getState().screen).toBe('playing');
+        expect(h.store.getState().presentation?.elapsedMs).toBeCloseTo(100);
+        expect(dispatch.mock.calls.map(([action]) => action.type)).toEqual([
+          'PRESENTATION_UPDATED',
+        ]);
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: excluded === 'hidden' ? 2 : 1,
+          steps: 6,
+          profiled: 1,
+        });
+        expect(h.host.getDiagnostics().frameMetrics).toEqual(before);
+        expect(h.frames.size).toBe(1);
+
+        key('Escape');
+        h.frame(100);
+        expect(step).toHaveBeenCalledTimes(6);
+        expect(step.mock.lastCall?.[0].pausePressed).toBe(true);
+        expect(h.store.getState().screen).toBe('paused');
+        expect(h.runtimes[0].getSnapshot().race.status).toBe('paused');
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: excluded === 'hidden' ? 3 : 1,
+          steps: 7,
+          profiled: 1,
+        });
+        h.frame(100);
+        expect(step).toHaveBeenCalledTimes(6);
+        expect(h.host.getSnapshot().frame.rendered).toBe(
+          excluded === 'hidden' ? 4 : 1,
+        );
+        expect(h.host.getDiagnostics().frameMetrics).toEqual(before);
+        expect(h.frames.size).toBe(1);
+      },
+    );
+
+    it.each(['zero-size', 'hidden'] as const)(
+      'retains runner fractional time across %s callbacks and surface restoration',
+      async (excluded) => {
+        const h = await setup();
+        await h.load();
+        const hidden = vi
+          .spyOn(document, 'hidden', 'get')
+          .mockReturnValue(false);
+        const step = vi.spyOn(h.runtimes[0], 'step');
+        h.frame(4);
+        const before = h.host.getDiagnostics().frameMetrics;
+        if (excluded === 'zero-size') h.resize({ width: 0, height: 0, dpr: 1 });
+        else hidden.mockReturnValue(true);
+        for (let i = 0; i < 2; i++) {
+          h.frame(4);
+          expect(h.frames.size).toBe(1);
+          expect(h.host.getDiagnostics().frameMetrics).toEqual(before);
+        }
+        expect(step).not.toHaveBeenCalled();
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: excluded === 'hidden' ? 3 : 1,
+          steps: 0,
+          profiled: 1,
+        });
+        hidden.mockReturnValue(false);
+        h.resize({ width: 800, height: 400, dpr: 1 });
+        h.frame(5);
+        expect(step).toHaveBeenCalledTimes(1);
+        expect(h.runtimes[0].getSnapshot().race.elapsedMs).toBeCloseTo(
+          1000 / 60,
+        );
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: excluded === 'hidden' ? 4 : 2,
+          steps: 1,
+          profiled: 2,
+        });
+        expect(h.host.getDiagnostics().frameMetrics.intervalMs).toEqual({
+          mean: 4.5,
+          p95: 5,
+          max: 5,
+        });
+        expect(h.frames.size).toBe(1);
+      },
+    );
+
+    it.each(['zero-size', 'hidden'] as const)(
+      'finishes the baseline render and keeps its chain when %s begins during presentation',
+      async (excluded) => {
+        const h = await setup();
+        await h.load();
+        const hidden = vi
+          .spyOn(document, 'hidden', 'get')
+          .mockReturnValue(false);
+        const present = h.runtimes[0].present.bind(h.runtimes[0]);
+        vi.spyOn(h.runtimes[0], 'present').mockImplementationOnce((...args) => {
+          present(...args);
+          if (excluded === 'zero-size')
+            h.resize({ width: 0, height: 0, dpr: 1 });
+          else hidden.mockReturnValue(true);
+        });
+        h.frame(17);
+        expect(h.renderer.render).toHaveBeenCalledOnce();
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: 1,
+          steps: 1,
+          profiled: 0,
+        });
+        expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+        expect(h.frames.size).toBe(1);
+        hidden.mockReturnValue(false);
+        h.resize({ width: 800, height: 400, dpr: 1 });
+        h.frame(17);
+        expect(h.host.getSnapshot().frame).toEqual({
+          rendered: 2,
+          steps: 2,
+          profiled: 1,
+        });
+        expect(h.frames.size).toBe(1);
+      },
+    );
+
+    it('does not retroactively profile a hidden callback when visibility clears during presentation', async () => {
+      const h = await setup();
+      await h.load();
+      const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      const present = h.runtimes[0].present.bind(h.runtimes[0]);
+      vi.spyOn(h.runtimes[0], 'present').mockImplementationOnce((...args) => {
+        present(...args);
+        hidden.mockReturnValue(false);
+      });
+      h.frame(17);
+      expect(h.host.getSnapshot().frame).toEqual({
+        rendered: 1,
+        steps: 1,
+        profiled: 0,
+      });
+      expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+      expect(h.frames.size).toBe(1);
+      h.frame(17);
+      expect(h.host.getSnapshot().frame).toEqual({
+        rendered: 2,
+        steps: 2,
+        profiled: 1,
+      });
+    });
+
+    it('keeps real visibilitychange auto-pause, clears input, and resets only the paused runner before explicit resume', async () => {
+      const h = await setup();
+      await h.load();
+      const step = vi.spyOn(h.runtimes[0], 'step');
+      h.frame(8);
+      const before = h.host.getDiagnostics().frameMetrics;
+      key('KeyW');
+      key('Space');
+      const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(h.store.getState().screen).toBe('paused');
+      h.frame(1000);
+      expect(step).not.toHaveBeenCalled();
+      expect(h.host.getSnapshot().frame).toEqual({
+        rendered: 2,
+        steps: 0,
+        profiled: 1,
+      });
+      expect(h.host.getDiagnostics().frameMetrics).toEqual(before);
+      expect(h.frames.size).toBe(1);
+      hidden.mockReturnValue(false);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(h.store.getState().screen).toBe('paused');
+      h.elapse(60_000);
+      h.store.dispatch({ type: 'RESUME' });
+      h.frame(8);
+      expect(step).not.toHaveBeenCalled();
+      h.frame(9);
+      expect(step).toHaveBeenCalledOnce();
+      expect(step.mock.lastCall?.[0]).toMatchObject({
+        throttle: 0,
+        dashPressed: false,
+        pausePressed: false,
+      });
+      expect(h.runtimes[0].getSnapshot().race.elapsedMs).toBeCloseTo(1000 / 60);
+      expect(h.host.getDiagnostics().frameMetrics.intervalMs?.max).toBe(9);
+      expect(h.host.getSnapshot().frame).toEqual({
+        rendered: 4,
+        steps: 1,
+        profiled: 3,
+      });
+      expect(h.frames.size).toBe(1);
+    });
+  });
+
+  it('retains through loss, excludes cancelled callbacks, restores paused and defers backing dimensions', async () => {
+    const h = await setup({
+      settings: createSettingsStore(() => ({
+        getItem: () => null,
+        setItem: () => {},
+      })),
+    });
+    await h.load();
+    h.renderer.domElement.width = 800;
+    h.renderer.domElement.height = 400;
+    h.frame(17);
+    const old = [...h.frames.values()][0];
+    const metrics = h.host.getDiagnostics().frameMetrics;
+    h.renderer.domElement.dispatchEvent(
+      new Event('webglcontextlost', { cancelable: true }),
+    );
+    h.elapse(60_000);
+    old(60_017);
+    expect(h.host.getDiagnostics().frameMetrics).toEqual(metrics);
+    h.host.settings.update({ renderQuality: 'low' });
+    expect(h.host.getDiagnostics()).toMatchObject({
+      graphicsLost: true,
+      selectedQuality: 'low',
+      backingPixels: { width: 800, height: 400 },
+      frameMetrics: { sampleCount: 0 },
+    });
+    h.renderer.domElement.dispatchEvent(new Event('webglcontextrestored'));
+    const pending = [...h.frames.values()];
+    old(60_017);
+    expect([...h.frames.values()]).toEqual(pending);
+    h.frame(17);
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+    h.store.dispatch({ type: 'RESUME' });
+    h.frame(17);
+    expect(h.host.getDiagnostics().frameMetrics.intervalMs?.mean).toBe(17);
+  });
+
+  it.each(['step', 'present', 'render'] as const)(
+    'retains prior metrics when %s fails and never profiles the failed frame',
+    async (phase) => {
+      const h = await setup();
+      await h.load();
+      h.frame(17);
+      const before = h.host.getDiagnostics().frameMetrics;
+      const fail = () => {
+        throw new Error('frame failed');
+      };
+      if (phase === 'render')
+        vi.mocked(h.renderer.render).mockImplementationOnce(fail);
+      else vi.spyOn(h.runtimes[0], phase).mockImplementationOnce(fail);
+      h.frame(17);
+      expect(h.store.getState().screen).toBe('error');
+      expect(h.host.getDiagnostics().frameMetrics).toEqual(before);
+      expect(h.host.getSnapshot().frame.profiled).toBe(1);
+      expect(h.frames.size).toBe(0);
+    },
+  );
+
+  it.each(['pause', 'loss', 'detach', 'title', 'dispose', 'quality'] as const)(
+    'rejects a frame invalidated during render by %s',
+    async (action) => {
+      const h = await setup({
+        settings: createSettingsStore(() => ({
+          getItem: () => null,
+          setItem: () => {},
+        })),
+      });
+      await h.load();
+      vi.mocked(h.renderer.render).mockImplementationOnce(() => {
+        switch (action) {
+          case 'pause':
+            h.store.dispatch({ type: 'PAUSE' });
+            break;
+          case 'loss':
+            h.renderer.domElement.dispatchEvent(
+              new Event('webglcontextlost', { cancelable: true }),
+            );
+            break;
+          case 'detach':
+            h.host.setContainer(null);
+            break;
+          case 'title':
+            h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+            break;
+          case 'dispose':
+            void h.host.dispose();
+            break;
+          case 'quality':
+            h.host.settings.update({ renderQuality: 'low' });
+            break;
+        }
+      });
+      h.frame(17);
+      expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+      expect(h.host.getSnapshot().frame.profiled).toBe(0);
+      expect(h.frames.size).toBe(
+        action === 'pause' || action === 'quality' ? 1 : 0,
+      );
+    },
+  );
+
+  it('excludes pause input and finished frames, leaving existing step/render behavior intact', async () => {
+    const h = await setup();
+    await h.load();
+    key('Escape');
+    h.frame(100);
+    expect(h.host.getSnapshot().frame).toEqual({
+      rendered: 1,
+      steps: 1,
+      profiled: 0,
+    });
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+    const finished = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+    });
+    await finished.load();
+    key('KeyW');
+    finished.frame(100);
+    expect(finished.store.getState().screen).toBe('results');
+    expect(finished.host.getDiagnostics().frameMetrics.sampleCount).toBe(0);
+  });
+
+  it('ignores stale callbacks after fresh load without changing counters, summaries or scheduling', async () => {
+    const h = await setup();
+    await h.load();
+    const stale = [...h.frames.values()][0];
+    h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+    await h.load();
+    const before = h.host.getDiagnostics();
+    const pending = [...h.frames.values()];
+    stale(60_000);
+    expect(h.host.getDiagnostics()).toEqual(before);
+    expect([...h.frames.values()]).toEqual(pending);
+  });
+
+  it('projects primitives before freezing without reading opaque payloads, storage, feedback, timers or full snapshots', async () => {
+    const audio = createAudioEngine();
+    const feedback = feedbackModule.createRunFeedback();
+    vi.spyOn(feedbackModule, 'createRunFeedback').mockReturnValue(feedback);
+    const storage = vi.fn(() => ({ getItem: () => null, setItem: () => {} }));
+    const now = vi.fn(() => 0);
+    const h = await setup({ audio, storage, now });
+    await h.load();
+    h.frame(17);
+    feedback.consume([{ type: 'dash' }], [], 0);
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    const trap = vi.fn(() => {
+      throw new Error('opaque data accessed');
+    });
+    Object.defineProperty(cyclic, 'secret', { enumerable: true, get: trap });
+    const audioState = { ...audio.getState(), cause: cyclic };
+    for (const key of ['cleanupErrors', 'observerErrors', 'notice'])
+      Object.defineProperty(audioState, key, { get: trap, enumerable: true });
+    vi.spyOn(audio, 'getState').mockReturnValue(audioState);
+    const audioSnapshot = vi
+      .spyOn(audio, 'getSnapshot')
+      .mockImplementation(trap);
+    const fullSnapshot = vi
+      .spyOn(h.host, 'getSnapshot')
+      .mockImplementation(trap);
+    const sceneSnapshot = vi
+      .spyOn(h.runtimes[0], 'getSnapshot')
+      .mockImplementation(trap);
+    const feedbackRead = vi.spyOn(feedback, 'getState');
+    const dispatch = vi.spyOn(h.store, 'dispatch');
+    const timer = vi.spyOn(window, 'setInterval');
+    const timeout = vi.spyOn(window, 'setTimeout');
+    const context = vi
+      .spyOn(h.renderer.domElement, 'getContext')
+      .mockImplementation(trap);
+    storage.mockClear();
+    now.mockClear();
+    const detachedRead = h.host.getDiagnostics;
+    const first = detachedRead();
+    expect(detachedRead()).toEqual(first);
+    expect(first.resources.scene).toEqual(h.runtimes[0].getDiagnostics());
+    expect(first.audio).toEqual({
+      status: audioState.status,
+      phase: audioState.phase,
+      contextState: audioState.contextState,
+      ownsContext: audioState.ownsContext,
+      ownedNodes: audioState.ownedNodes,
+      activeEffects: audioState.activeEffects,
+      activeAmbience: audioState.activeAmbience,
+      pendingUnlock: audioState.pendingUnlock,
+      pendingCleanup: audioState.pendingCleanup,
+    });
+    function assertPrimitiveTree(value: unknown) {
+      if (value === null || typeof value !== 'object') return;
+      expect(Object.isFrozen(value)).toBe(true);
+      for (const child of Object.values(value)) {
+        expect(['object', 'string', 'number', 'boolean']).toContain(
+          typeof child,
+        );
+        assertPrimitiveTree(child);
+      }
+    }
+    assertPrimitiveTree(first);
+    expect(Object.keys(first).sort()).toEqual([
+      'audio',
+      'backingPixels',
+      'cleanup',
+      'frame',
+      'frameMetrics',
+      'graphicsLost',
+      'lifecycle',
+      'resources',
+      'screen',
+      'selectedQuality',
+    ]);
+    for (const spy of [
+      trap,
+      storage,
+      now,
+      feedbackRead,
+      dispatch,
+      timer,
+      timeout,
+      context,
+      audioSnapshot,
+      fullSnapshot,
+      sceneSnapshot,
+    ])
+      expect(spy).not.toHaveBeenCalled();
+    expect(feedback.getState(1)?.cue).toBe('dash');
+  });
+
+  it('does not summarize during collection or ordinary acceptance snapshots', async () => {
+    const metrics = frameMetricsModule.createFrameMetrics();
+    vi.spyOn(frameMetricsModule, 'createFrameMetrics').mockReturnValue(metrics);
+    const summarize = vi.spyOn(metrics, 'getSnapshot');
+    const h = await setup();
+    await h.load();
+    for (let i = 0; i < 10; i++) {
+      h.frame(17);
+      h.host.getSnapshot();
+    }
+    expect(summarize).not.toHaveBeenCalled();
+    expect(h.host.getDiagnostics().frameMetrics.sampleCount).toBe(10);
+    expect(summarize).toHaveBeenCalledOnce();
+  });
+
+  it('distinguishes cleared active resources from retained failed release owners without examining errors', async () => {
+    const h = await setup();
+    await h.load();
+    vi.mocked(h.renderer.dispose).mockImplementationOnce(() => {
+      throw new Error('retained renderer');
+    });
+    h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+    const diagnostics = h.host.getDiagnostics();
+    expect(diagnostics).toMatchObject({
+      lifecycle: 'cleanup-pending',
+      cleanup: {
+        pendingReleases: 1,
+        constructionOwners: 0,
+        failed: true,
+        audioFailed: false,
+      },
+      resources: { canvases: 0, rafChains: 0, pendingCleanup: 1, scene: null },
+      backingPixels: null,
+    });
+    h.host.retryCleanup();
+    expect(diagnostics.cleanup.pendingReleases).toBe(1);
+    expect(h.host.getDiagnostics().cleanup.pendingReleases).toBe(0);
   });
 });
 

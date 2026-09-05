@@ -122,6 +122,9 @@ describe('graphics recovery shell', () => {
           setContainer: () => {},
           setSettingsOpen: () => {},
           retryCourse,
+          getDiagnostics: () => {
+            throw new Error('Diagnostics not requested in this test.');
+          },
           inspectSavedProgress: () => ({
             status: 'empty',
             progress: { version: 1, courses: {} },
@@ -180,6 +183,106 @@ describe('graphics recovery shell', () => {
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(store.getState().screen).toBe('playing');
   });
+});
+
+describe('stationary diagnostics entry', () => {
+  it.each(['title', 'course-select', 'paused', 'results', 'error'] as const)(
+    'opens one native modal on %s and closes on navigation without resuming',
+    async (screenName) => {
+      const store = createAppStore();
+      const host = new GameHost(store, {
+        storage: () => ({ getItem: () => null, setItem: () => {} }),
+      });
+      if (screenName !== 'title' && screenName !== 'error')
+        store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      if (screenName === 'paused' || screenName === 'results') {
+        store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+        store.dispatch({ type: 'COURSE_READY' });
+        if (screenName === 'paused') store.dispatch({ type: 'PAUSE' });
+        else
+          store.dispatch({
+            type: 'RUN_FINISHED',
+            result: {
+              courseId: 'sunlit-shoals',
+              elapsedMs: 50_000,
+              medal: null,
+              pearlCount: 0,
+              totalPearls: 4,
+            },
+          });
+      }
+      if (screenName === 'error')
+        store.dispatch({
+          type: 'SHOW_ERROR',
+          title: 'Unavailable',
+          detail: 'Details remain actionable.',
+        });
+      const read = vi.spyOn(host, 'getDiagnostics');
+      const ownership = vi.spyOn(host, 'setSettingsOpen');
+      const unlock = vi.spyOn(host, 'unlockAudio');
+      const view = render(
+        <App store={store} host={{ ...host, setContainer: () => {} }} />,
+      );
+      try {
+        const opener = screen.getByRole('button', { name: 'Diagnostics' });
+        expect(opener.parentElement).toBe(
+          screen.getByRole('button', { name: 'Saved progress' }).parentElement,
+        );
+        expect(read).not.toHaveBeenCalled();
+        const before = store.getState();
+        await userEvent.click(opener);
+        expect(screen.getAllByRole('dialog')).toHaveLength(1);
+        expect(read).toHaveBeenCalledOnce();
+        await userEvent.keyboard('[Escape]');
+        expect(opener).toHaveFocus();
+        expect(store.getState()).toBe(before);
+        await userEvent.click(opener);
+        act(() =>
+          store.dispatch({
+            type:
+              screenName === 'title' ? 'OPEN_COURSE_SELECT' : 'RETURN_TO_TITLE',
+          }),
+        );
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(ownership).toHaveBeenLastCalledWith(false);
+        expect(unlock).not.toHaveBeenCalled();
+        await userEvent.click(
+          screen.getByRole('button', { name: 'Saved progress' }),
+        );
+        expect(screen.getAllByRole('dialog')).toHaveLength(1);
+        expect(
+          screen.getByRole('dialog', { name: 'Saved progress' }),
+        ).toBeVisible();
+      } finally {
+        view.unmount();
+        await host.dispose();
+      }
+    },
+  );
+
+  it.each(['loading', 'playing'] as const)(
+    'has no diagnostics entry while %s',
+    async (screenName) => {
+      const store = createAppStore();
+      const host = new GameHost(store, {
+        storage: () => ({ getItem: () => null, setItem: () => {} }),
+      });
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+      if (screenName === 'playing') store.dispatch({ type: 'COURSE_READY' });
+      const view = render(
+        <App store={store} host={{ ...host, setContainer: () => {} }} />,
+      );
+      try {
+        expect(
+          screen.queryByRole('button', { name: 'Diagnostics' }),
+        ).not.toBeInTheDocument();
+      } finally {
+        view.unmount();
+        await host.dispose();
+      }
+    },
+  );
 });
 
 describe('App shell', () => {
@@ -320,6 +423,7 @@ describe('App shell', () => {
             setContainer: () => {},
             setSettingsOpen,
             retryCourse: host.retryCourse,
+            getDiagnostics: host.getDiagnostics,
             inspectSavedProgress: host.inspectSavedProgress,
             replaceSavedProgress: host.replaceSavedProgress,
             retrySaving: host.retrySaving,
@@ -407,6 +511,7 @@ describe('App shell', () => {
           setContainer: () => {},
           setSettingsOpen: host.setSettingsOpen,
           retryCourse: host.retryCourse,
+          getDiagnostics: host.getDiagnostics,
           inspectSavedProgress: host.inspectSavedProgress,
           replaceSavedProgress: host.replaceSavedProgress,
           retrySaving: host.retrySaving,

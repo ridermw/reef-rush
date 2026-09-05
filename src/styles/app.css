@@ -553,9 +553,44 @@ dd {
   background: #061f24bf;
 }
 
-.saved-progress-entry {
+.stationary-utilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   width: min(100%, 72rem);
   margin: 0.75rem auto 0;
+}
+
+.diagnostics-group {
+  border-top: 1px solid var(--color-line);
+  padding-top: 0.75rem;
+}
+
+.diagnostics-group h3 {
+  color: var(--color-reef);
+  font-size: 0.85rem;
+}
+
+.diagnostics-readings {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.85rem;
+}
+
+.diagnostics-readings > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  padding: 0.2rem 0;
+}
+
+.diagnostics-readings dt {
+  color: var(--color-copy);
+}
+
+.diagnostics-readings dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .recovery-warning {

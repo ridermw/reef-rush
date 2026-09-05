@@ -21,6 +21,7 @@ import {
 } from '../settings/SettingsStore';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SavedProgressDialog } from './components/SavedProgressDialog';
+import { DiagnosticsDialog } from './components/DiagnosticsDialog';
 import { AudioNotice, type ShellAudio } from './components/AudioNotice';
 
 export interface AppProps {
@@ -35,6 +36,7 @@ export interface AppProps {
     | 'inspectSavedProgress'
     | 'replaceSavedProgress'
     | 'retrySaving'
+    | 'getDiagnostics'
   > &
     ShellAudio;
 }
@@ -52,7 +54,9 @@ export function App({ store, host, settings }: AppProps) {
     () => settings ?? host?.settings ?? createSettingsStore(),
   );
   const [modal, setModal] = useState<
-    { kind: 'settings' } | { kind: 'progress'; screen: AppScreen } | null
+    | { kind: 'settings' }
+    | { kind: 'progress' | 'diagnostics'; screen: AppScreen }
+    | null
   >(null);
   const preferencesState = useSyncExternalStore(
     preferences.subscribe,
@@ -76,7 +80,7 @@ export function App({ store, host, settings }: AppProps) {
     store.getState,
     store.getState,
   );
-  if (modal?.kind === 'progress' && modal.screen !== state.screen) {
+  if (modal && modal.kind !== 'settings' && modal.screen !== state.screen) {
     setModal(null);
   }
   const courseName = state.selectedCourseId
@@ -200,12 +204,14 @@ export function App({ store, host, settings }: AppProps) {
       />
     ) : modal?.kind === 'progress' && host && stationary ? (
       <SavedProgressDialog host={host} onClose={() => setModal(null)} />
+    ) : modal?.kind === 'diagnostics' && host && stationary ? (
+      <DiagnosticsDialog host={host} onClose={() => setModal(null)} />
     ) : null;
   const notices = (
     <>
       {progressNotice}
       {host && stationary && (
-        <div className="saved-progress-entry">
+        <div className="stationary-utilities">
           <button
             className="secondary-button"
             type="button"
@@ -215,6 +221,16 @@ export function App({ store, host, settings }: AppProps) {
             }}
           >
             Saved progress
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              host.setSettingsOpen(true);
+              setModal({ kind: 'diagnostics', screen: state.screen });
+            }}
+          >
+            Diagnostics
           </button>
         </div>
       )}

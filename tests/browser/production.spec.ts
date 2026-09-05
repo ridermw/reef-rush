@@ -3,7 +3,7 @@ import { expectDraw, selectSunlit, wallInterval } from './acceptance-helpers';
 
 test.use({ viewport: { width: 960, height: 720 }, deviceScaleFactor: 0.5 });
 
-test('normal production has no diagnostics and lazy real gameplay works under the Pages base', async ({
+test('normal production has no acceptance global and lazy real gameplay works under the Pages base', async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -91,6 +91,24 @@ test('normal production has no diagnostics and lazy real gameplay works under th
   const paused = await time.innerText();
   await wallInterval(page);
   await expect(time).toHaveText(paused);
+  await page.getByRole('button', { name: 'Diagnostics', exact: true }).click();
+  const diagnostics = page.getByRole('dialog', {
+    name: 'Diagnostics',
+    exact: true,
+  });
+  await expect(diagnostics).toBeVisible();
+  await expect(
+    diagnostics.getByText('Recent running samples', { exact: true }),
+  ).toBeVisible();
+  await diagnostics.getByRole('button', { name: 'Refresh snapshot' }).click();
+  expect(await noHook()).toBe(true);
+  await expect(time).toHaveText(paused);
+  await diagnostics.getByRole('button', { name: 'Close diagnostics' }).click();
+  await expect(diagnostics).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Diagnostics', exact: true }),
+  ).toBeFocused();
+  await expect(page.getByText('Run paused', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await expect(time).not.toHaveText(paused);
   await page.getByRole('button', { name: 'Pause run' }).click();

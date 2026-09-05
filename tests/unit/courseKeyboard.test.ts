@@ -39,7 +39,7 @@ it.each([kelpworks, blacksmoker])(
       collectedPearlIds: [],
       lifecycle: 'active',
       cleanupError: null,
-      frame: { rendered: 1, steps: 1 },
+      frame: { rendered: 1, steps: 1, profiled: 1 },
       resources: {
         canvases: 1,
         rafChains: 1,
