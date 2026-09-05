@@ -21,7 +21,8 @@ export function CourseSelectScreen({
           <h1>Choose a course</h1>
           <p>
             Warm shallows today. Wilder waters ahead. Earn a medal in Sunlit
-            Shoals to qualify for the next expedition.
+            Shoals to unlock Kelpworks, then a medal in Kelpworks to unlock
+            Blacksmoker Run.
           </p>
         </div>
       </section>

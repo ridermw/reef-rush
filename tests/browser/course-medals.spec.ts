@@ -48,7 +48,7 @@ test('earned Sunlit then three consecutive native Kelpworks medals save all actu
   await page.getByRole('button', { name: 'Choose another course' }).click();
   await expectIdle(page);
   await expect(
-    page.getByRole('button', { name: 'Blacksmoker Run - not yet available' }),
+    page.getByRole('button', { name: 'Locked: Blacksmoker Run', exact: true }),
   ).toBeDisabled();
   await page
     .getByRole('button', { name: 'Load Kelpworks', exact: true })
@@ -125,7 +125,7 @@ test('earned Sunlit then three consecutive native Kelpworks medals save all actu
   await page.getByRole('button', { name: 'Choose another course' }).click();
   await expectIdle(page);
   await expect(
-    page.getByRole('button', { name: 'Blacksmoker Run - not yet available' }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Load Blacksmoker Run', exact: true }),
+  ).toBeEnabled();
   expect(await savedProgress(page)).toEqual(progress);
 });

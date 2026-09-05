@@ -290,7 +290,7 @@ it('earns gold and conservative bronze through real controls, with stable owners
       );
       expect(
         COURSES.find(({ id }) => id === 'blacksmoker-run')?.available,
-      ).toBe(false);
+      ).toBe(true);
       elapsed[profile].push(snapshot.race.elapsedMs);
       expect(runtime.getDiagnostics()).toEqual(counts);
       runtime.dispose();

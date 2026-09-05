@@ -47,7 +47,7 @@ test('empty progress locks implemented Kelpworks without loading its course or a
     page.getByRole('button', { name: 'Load Sunlit Shoals', exact: true }),
   ).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Blacksmoker Run - not yet available' }),
+    page.getByRole('button', { name: 'Locked: Blacksmoker Run', exact: true }),
   ).toBeDisabled();
   await expectIdle(page);
   expect(await stored(page, progressKey)).toBeNull();
@@ -166,7 +166,7 @@ test('actual Sunlit earns lazy Kelpworks, native five-pearl finishes, replay and
     page.getByRole('button', { name: 'Load Kelpworks', exact: true }),
   ).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Blacksmoker Run - not yet available' }),
+    page.getByRole('button', { name: 'Locked: Blacksmoker Run', exact: true }),
   ).toBeDisabled();
   const chunk = page.waitForResponse((response) =>
     /\/assets\/kelpworks-[^/]+\.js$/.test(new URL(response.url()).pathname),

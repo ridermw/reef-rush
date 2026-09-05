@@ -531,8 +531,9 @@ describe('App shell', () => {
   });
 
   it.each(['bronze', 'silver', 'gold'] as const)(
-    'enables Kelpworks after a Sunlit %s while keeping Blacksmoker unavailable',
-    (medal) => {
+    'enables native Blacksmoker selection after qualifying Sunlit and Kelpworks %s medals',
+    async (medal) => {
+      const user = userEvent.setup();
       const store = createAppStore();
       store.dispatch({
         type: 'PROGRESS_UPDATED',
@@ -546,7 +547,7 @@ describe('App shell', () => {
             },
             kelpworks: {
               bestElapsedMs: 20_000,
-              bestMedal: 'gold',
+              bestMedal: medal,
               bestPearlCount: 5,
             },
           },
@@ -558,15 +559,44 @@ describe('App shell', () => {
       expect(
         screen.getByRole('button', { name: 'Load Kelpworks' }),
       ).toBeEnabled();
-      expect(
-        screen.getByRole('button', { name: /Blacksmoker Run/ }),
-      ).toBeDisabled();
+      const blacksmoker = screen.getByRole('button', {
+        name: 'Load Blacksmoker Run',
+      });
+      expect(blacksmoker).toBeEnabled();
+      expect(blacksmoker.tagName).toBe('BUTTON');
+      expect(blacksmoker).toHaveAttribute('type', 'button');
       expect(
         screen.getByRole('button', { name: /Sunlit Shoals/ }),
       ).toBeEnabled();
-      expect(screen.getAllByText(/not yet available/i)).toHaveLength(1);
+      expect(screen.queryByText(/not yet available/i)).not.toBeInTheDocument();
+      await user.tab();
+      expect(
+        screen.getByRole('button', { name: 'Load Sunlit Shoals' }),
+      ).toHaveFocus();
+      await user.tab();
+      expect(
+        screen.getByRole('button', { name: 'Load Kelpworks' }),
+      ).toHaveFocus();
+      await user.tab();
+      expect(blacksmoker).toHaveFocus();
+      await user.keyboard('[Enter]');
+      expect(store.getState()).toMatchObject({
+        screen: 'loading',
+        selectedCourseId: 'blacksmoker-run',
+      });
     },
   );
+
+  it('explains both medal qualifications on course selection', () => {
+    const store = createAppStore();
+    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+    render(<App store={store} />);
+    expect(
+      screen.getByText(
+        /Earn a medal in Sunlit Shoals to unlock Kelpworks, then a medal in Kelpworks to unlock Blacksmoker Run/,
+      ),
+    ).toBeVisible();
+  });
 
   it.each([false, true])(
     'keeps available Kelpworks locked without a qualifying Sunlit medal (record: %s)',
@@ -595,9 +625,71 @@ describe('App shell', () => {
       ).toBeDisabled();
       expect(
         screen.getByRole('button', {
-          name: 'Blacksmoker Run - not yet available',
+          name: 'Locked: Blacksmoker Run',
         }),
       ).toBeDisabled();
+    },
+  );
+
+  it.each([
+    { name: 'missing Kelpworks record', sunlit: 'bronze', kelp: undefined },
+    { name: 'non-medal Kelpworks finish', sunlit: 'bronze', kelp: null },
+    { name: 'orphan Kelpworks medal', sunlit: undefined, kelp: 'gold' },
+    { name: 'non-medal Sunlit finish', sunlit: null, kelp: 'gold' },
+  ] as const)(
+    'keeps Blacksmoker locked with $name despite an orphan final-course medal',
+    async ({ sunlit, kelp }) => {
+      const user = userEvent.setup();
+      const progress = parseProgress({
+        version: 1,
+        courses: {
+          ...(sunlit !== undefined && {
+            'sunlit-shoals': {
+              bestElapsedMs: 20_000,
+              bestMedal: sunlit,
+              bestPearlCount: 4,
+            },
+          }),
+          ...(kelp !== undefined && {
+            kelpworks: {
+              bestElapsedMs: 40_000,
+              bestMedal: kelp,
+              bestPearlCount: 5,
+            },
+          }),
+          'blacksmoker-run': {
+            bestElapsedMs: 30_000,
+            bestMedal: 'gold',
+            bestPearlCount: 6,
+          },
+        },
+      });
+      const store = createAppStore();
+      store.dispatch({ type: 'PROGRESS_UPDATED', progress, notice: null });
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      render(<App store={store} />);
+      const locked = screen.getByRole('button', {
+        name: 'Locked: Blacksmoker Run',
+      });
+      expect(locked).toBeDisabled();
+      expect(locked.tagName).toBe('BUTTON');
+      await user.click(locked);
+      expect(store.getState().screen).toBe('course-select');
+      await user.tab();
+      expect(
+        screen.getByRole('button', { name: 'Load Sunlit Shoals' }),
+      ).toHaveFocus();
+      if (sunlit) {
+        await user.tab();
+        expect(
+          screen.getByRole('button', { name: 'Load Kelpworks' }),
+        ).toHaveFocus();
+      }
+      await user.tab();
+      expect(
+        screen.getByRole('button', { name: 'Back to title' }),
+      ).toHaveFocus();
+      expect(store.getState().progress).toEqual(progress);
     },
   );
 

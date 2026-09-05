@@ -43,7 +43,7 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it('loads original gltf Blacksmoker without activating availability', async () => {
+  it('loads original gltf Blacksmoker and makes it available to earned progression', async () => {
     await expect(
       loadCourseDefinition('blacksmoker-run'),
     ).resolves.toMatchObject({
@@ -60,7 +60,7 @@ describe('explicit lazy course loading', () => {
     });
     expect(
       COURSES.find((course) => course.id === 'blacksmoker-run')?.available,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it.each(['sunlit-shoals', 'kelpworks', 'blacksmoker-run'])(

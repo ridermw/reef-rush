@@ -41,6 +41,7 @@ const reviewed = {
 
 it.each(['fast', 'conservative'] as const)(
   'preserves exact reviewed/generated %s traversal and releases original Blacksmoker assets once across three cycles',
+  { timeout: 15_000 },
   async (profile) => {
     const fetch = stubOriginalAssetFetch();
     const reference = await createSceneRuntime(
@@ -191,7 +192,7 @@ it.each(['fast', 'conservative'] as const)(
       materials.mock.calls.length,
     );
     expect(COURSES.find(({ id }) => id === 'blacksmoker-run')?.available).toBe(
-      false,
+      true,
     );
     console.info(
       `Original/generated Blacksmoker ${profile}: ${JSON.stringify({

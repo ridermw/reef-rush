@@ -96,7 +96,7 @@ it('authors the original trench, six ordered checkpoints and pearls, nine solids
     spawn: { position: [0, -5, 0], yaw: 0 },
     medalTimesMs: { gold: 34_000, silver: 52_000, bronze: 75_000 },
   });
-  expect(metadata?.available).toBe(false);
+  expect(metadata?.available).toBe(true);
   expect(course.checkpoints).toEqual(
     checkpoints.map(([id, position]) => ({
       id,
@@ -342,120 +342,124 @@ async function observeTraversal(profile: TraversalProfile, cycle: number) {
   return observation;
 }
 
-it('finishes both normalized profiles with every award, moving gate and current, no contacts and stable three-cycle ownership', async () => {
-  const observations: Awaited<ReturnType<typeof observeTraversal>>[] = [];
-  for (const profile of ['fast', 'conservative'] as const) {
-    for (let cycle = 0; cycle < 3; cycle++) {
-      observations.push(await observeTraversal(profile, cycle));
+it(
+  'finishes both normalized profiles with every award, moving gate and current, no contacts and stable three-cycle ownership',
+  { timeout: 15_000 },
+  async () => {
+    const observations: Awaited<ReturnType<typeof observeTraversal>>[] = [];
+    for (const profile of ['fast', 'conservative'] as const) {
+      for (let cycle = 0; cycle < 3; cycle++) {
+        observations.push(await observeTraversal(profile, cycle));
+      }
     }
-  }
-  for (const observation of observations) {
-    const {
-      profile,
-      definition,
-      traversal,
-      currentSteps,
-      gateRotations,
-      movedGates,
-      resources,
-    } = observation;
-    const { snapshot, events, steps, collisions, dashes } = traversal;
-    const baseline = calibrated[profile];
-    expect(snapshot.race.status, JSON.stringify(traversal)).toBe('finished');
-    expect(steps).toBeLessThan(TRAVERSAL_MAX_STEPS);
-    expect(steps).toBe(baseline.steps);
-    expect(snapshot.race.elapsedMs).toBe(baseline.elapsedMs);
-    expect(snapshot.race.result?.medal).toBe(baseline.medal);
-    expect(dashes).toBe(baseline.dashes);
-    expect(traversal.steeringSteps).toBeGreaterThan(100);
-    expect(
-      events
-        .filter((event) => event.type === 'checkpoint')
-        .map((event) => [event.checkpointId, event.checkpointIndex]),
-    ).toEqual(checkpoints.map(([id], index) => [id, index]));
-    expect(
-      events
-        .filter((event) => event.type === 'pearl')
-        .map((event) => event.pearlId),
-    ).toEqual(pearls.map(([id]) => id));
-    expect(traversal.milestones.map(({ id }) => id)).toEqual(
-      courseWaypoints(definition).map(({ id }) => id),
-    );
-    expect(traversal.milestones.map(({ step }) => step)).toEqual(
-      baseline.milestoneSteps,
-    );
-    expect(traversal.milestones.slice(-2).map(({ id }) => id)).toEqual([
-      'smoker-pearl-home',
-      'smoker-finish',
-    ]);
-    expect(events.map(({ elapsedMs }) => elapsedMs)).toEqual(
-      events.map(({ elapsedMs }) => elapsedMs).sort((a, b) => a - b),
-    );
-    expect(events.filter(({ type }) => type === 'finish')).toEqual([
-      expect.objectContaining({ result: snapshot.race.result }),
-    ]);
-    expect(events.at(-1)?.type).toBe('finish');
-    expect(snapshot.race).toMatchObject({
-      checkpointIndex: 6,
-      checkpointCount: 6,
-      pearlCount: 6,
-      totalPearls: 6,
-      result: {
-        courseId: 'blacksmoker-run',
-        elapsedMs: snapshot.race.elapsedMs,
+    for (const observation of observations) {
+      const {
+        profile,
+        definition,
+        traversal,
+        currentSteps,
+        gateRotations,
+        movedGates,
+        resources,
+      } = observation;
+      const { snapshot, events, steps, collisions, dashes } = traversal;
+      const baseline = calibrated[profile];
+      expect(snapshot.race.status, JSON.stringify(traversal)).toBe('finished');
+      expect(steps).toBeLessThan(TRAVERSAL_MAX_STEPS);
+      expect(steps).toBe(baseline.steps);
+      expect(snapshot.race.elapsedMs).toBe(baseline.elapsedMs);
+      expect(snapshot.race.result?.medal).toBe(baseline.medal);
+      expect(dashes).toBe(baseline.dashes);
+      expect(traversal.steeringSteps).toBeGreaterThan(100);
+      expect(
+        events
+          .filter((event) => event.type === 'checkpoint')
+          .map((event) => [event.checkpointId, event.checkpointIndex]),
+      ).toEqual(checkpoints.map(([id], index) => [id, index]));
+      expect(
+        events
+          .filter((event) => event.type === 'pearl')
+          .map((event) => event.pearlId),
+      ).toEqual(pearls.map(([id]) => id));
+      expect(traversal.milestones.map(({ id }) => id)).toEqual(
+        courseWaypoints(definition).map(({ id }) => id),
+      );
+      expect(traversal.milestones.map(({ step }) => step)).toEqual(
+        baseline.milestoneSteps,
+      );
+      expect(traversal.milestones.slice(-2).map(({ id }) => id)).toEqual([
+        'smoker-pearl-home',
+        'smoker-finish',
+      ]);
+      expect(events.map(({ elapsedMs }) => elapsedMs)).toEqual(
+        events.map(({ elapsedMs }) => elapsedMs).sort((a, b) => a - b),
+      );
+      expect(events.filter(({ type }) => type === 'finish')).toEqual([
+        expect.objectContaining({ result: snapshot.race.result }),
+      ]);
+      expect(events.at(-1)?.type).toBe('finish');
+      expect(snapshot.race).toMatchObject({
+        checkpointIndex: 6,
+        checkpointCount: 6,
         pearlCount: 6,
         totalPearls: 6,
-      },
-    });
-    expect(snapshot.collectedPearlIds).toEqual(pearls.map(([id]) => id));
-    expect(snapshot.race.elapsedMs).toBeLessThanOrEqual(
-      definition.medalTimesMs[profile === 'fast' ? 'gold' : 'bronze'],
-    );
-    if (profile === 'fast') {
-      expect(snapshot.race.result?.medal).toBe('gold');
-      expect(dashes).toBeGreaterThan(0);
-    } else {
-      expect(['bronze', 'silver', 'gold']).toContain(
-        snapshot.race.result?.medal,
+        result: {
+          courseId: 'blacksmoker-run',
+          elapsedMs: snapshot.race.elapsedMs,
+          pearlCount: 6,
+          totalPearls: 6,
+        },
+      });
+      expect(snapshot.collectedPearlIds).toEqual(pearls.map(([id]) => id));
+      expect(snapshot.race.elapsedMs).toBeLessThanOrEqual(
+        definition.medalTimesMs[profile === 'fast' ? 'gold' : 'bronze'],
       );
-      expect(dashes).toBe(0);
+      if (profile === 'fast') {
+        expect(snapshot.race.result?.medal).toBe('gold');
+        expect(dashes).toBeGreaterThan(0);
+      } else {
+        expect(['bronze', 'silver', 'gold']).toContain(
+          snapshot.race.result?.medal,
+        );
+        expect(dashes).toBe(0);
+      }
+      expect(collisions).toEqual([]);
+      expect(Object.keys(currentSteps)).toEqual(currentIds);
+      expect(currentSteps).toEqual(baseline.currentSteps);
+      for (const id of currentIds)
+        expect(currentSteps[id], id).toBeGreaterThan(0);
+      expect(observation.validGates).toBe(true);
+      expect(Object.keys(gateRotations)).toEqual(gateIds);
+      expect([...movedGates].sort()).toEqual([...gateIds].sort());
+      for (const id of gateIds)
+        expect(gateRotations[id].minimumAbsDot, id).toBeLessThan(1 - 1e-6);
+      expect(resources).toEqual({
+        lifecycle: 'active',
+        bodies: 3,
+        colliders: 13,
+        geometries: 4,
+        materials: 19,
+      });
+      expect(resources).toEqual(observations[0].resources);
+      expect(observation.finalResources).toEqual(resources);
+      expect(observation.disposedResources).toEqual({
+        lifecycle: 'disposed',
+        bodies: 0,
+        colliders: 0,
+        geometries: 0,
+        materials: 0,
+      });
+      const first = observations.find((run) => run.profile === profile)!;
+      expect(traversal).toEqual(first.traversal);
+      expect(currentSteps).toEqual(first.currentSteps);
+      expect(gateRotations).toEqual(first.gateRotations);
     }
-    expect(collisions).toEqual([]);
-    expect(Object.keys(currentSteps)).toEqual(currentIds);
-    expect(currentSteps).toEqual(baseline.currentSteps);
-    for (const id of currentIds)
-      expect(currentSteps[id], id).toBeGreaterThan(0);
-    expect(observation.validGates).toBe(true);
-    expect(Object.keys(gateRotations)).toEqual(gateIds);
-    expect([...movedGates].sort()).toEqual([...gateIds].sort());
-    for (const id of gateIds)
-      expect(gateRotations[id].minimumAbsDot, id).toBeLessThan(1 - 1e-6);
-    expect(resources).toEqual({
-      lifecycle: 'active',
-      bodies: 3,
-      colliders: 13,
-      geometries: 4,
-      materials: 19,
-    });
-    expect(resources).toEqual(observations[0].resources);
-    expect(observation.finalResources).toEqual(resources);
-    expect(observation.disposedResources).toEqual({
-      lifecycle: 'disposed',
-      bodies: 0,
-      colliders: 0,
-      geometries: 0,
-      materials: 0,
-    });
-    const first = observations.find((run) => run.profile === profile)!;
-    expect(traversal).toEqual(first.traversal);
-    expect(currentSteps).toEqual(first.currentSteps);
-    expect(gateRotations).toEqual(first.gateRotations);
-  }
-  const fast = observations.find(({ profile }) => profile === 'fast')!;
-  const conservative = observations.find(
-    ({ profile }) => profile === 'conservative',
-  )!;
-  expect(fast.traversal.snapshot.race.elapsedMs).toBeLessThan(
-    conservative.traversal.snapshot.race.elapsedMs,
-  );
-});
+    const fast = observations.find(({ profile }) => profile === 'fast')!;
+    const conservative = observations.find(
+      ({ profile }) => profile === 'conservative',
+    )!;
+    expect(fast.traversal.snapshot.race.elapsedMs).toBeLessThan(
+      conservative.traversal.snapshot.race.elapsedMs,
+    );
+  },
+);

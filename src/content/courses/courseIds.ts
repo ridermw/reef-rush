@@ -28,7 +28,7 @@ export const COURSES: readonly CourseSummary[] = [
   },
   {
     id: 'blacksmoker-run',
-    available: false,
+    available: true,
     name: 'Blacksmoker Run',
     summary: 'A volatile trench descent built for high-pressure finishes.',
   },
