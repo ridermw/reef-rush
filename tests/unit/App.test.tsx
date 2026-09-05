@@ -1,15 +1,41 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/app/App';
 import { createAppStore, type AppPresentation } from '../../src/app/appStore';
 import { GameHost, type HostRenderer } from '../../src/game/core/GameHost';
 import { createSceneRuntime } from '../../src/game/core/SceneRuntime';
 import { parseCourseDefinition } from '../../src/game/course/courseDefinition';
 import { courseFixture } from '../fixtures/courseDefinition';
+import { createSettingsStore } from '../../src/settings/SettingsStore';
+import { DEFAULT_SETTINGS } from '../../src/settings/settings';
+import { createAudioEngine } from '../../src/game/audio/AudioEngine';
+import { FakeContext } from '../fixtures/audioContext';
+import { finishAchievements } from '../../src/game/progression/finishAchievements';
+import { parseProgress } from '../../src/game/progression/progress';
+
+// JSDOM has the dialog element but no native modal/focus implementation.
+// Browser acceptance exercises the real showModal/cancel/focus behavior.
+beforeEach(() => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = true;
+      },
+    },
+    close: {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = false;
+      },
+    },
+  });
+});
+afterEach(() => vi.restoreAllMocks());
 
 const updatedPresentation: AppPresentation = {
   elapsedMs: 54_320,
@@ -29,6 +55,349 @@ function expectGameRoot(expected: 'present' | 'absent'): void {
 }
 
 describe('App shell', () => {
+  it('offers expedition copy, never generated/prototype jargon, and no external artwork', () => {
+    const view = render(<App store={createAppStore()} />);
+    expect(view.container.textContent).not.toMatch(
+      /prototype|generated|scene tree|the shell/i,
+    );
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeVisible();
+    expect(
+      view.container.querySelectorAll('img[src^="http"],iframe,video'),
+    ).toHaveLength(0);
+  });
+
+  it('keeps loading and error copy player-facing', () => {
+    const store = createAppStore();
+    const view = render(<App store={store} />);
+    act(() => {
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+    });
+    expect(view.container.textContent).not.toMatch(
+      /physics|render surface|shell/i,
+    );
+    act(() =>
+      store.dispatch({
+        type: 'SHOW_ERROR',
+        title: 'Run unavailable',
+        detail: 'Please try again.',
+      }),
+    );
+    expect(view.container.textContent).not.toMatch(/shell error/i);
+  });
+
+  it('edits every native setting immediately and surfaces protected session-only persistence', async () => {
+    const user = userEvent.setup();
+    const write = vi.fn(() => {
+      throw new Error('quota');
+    });
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: write,
+    }));
+    const view = render(<App store={createAppStore()} settings={settings} />);
+    const opener = screen.getByRole('button', { name: 'Settings' });
+    await user.click(opener);
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(dialog).toHaveAttribute('tabindex', '-1');
+    expect(dialog).toHaveFocus();
+    const controls = within(dialog);
+    const volume = controls.getByRole('slider', { name: 'Master volume' });
+    expect(volume).toHaveValue('0.4');
+    expect(volume).toHaveAttribute('min', '0');
+    expect(volume).toHaveAttribute('max', '1');
+    fireEvent.change(volume, { target: { value: '0.2' } });
+    const sensitivity = controls.getByRole('slider', {
+      name: 'Mouse sensitivity',
+    });
+    expect(sensitivity).toHaveAttribute('min', '0.25');
+    expect(sensitivity).toHaveAttribute('max', '2');
+    fireEvent.change(sensitivity, { target: { value: '1.5' } });
+    for (const name of [
+      'Sound effects',
+      'Ambience',
+      'Mouse steering',
+      'Invert mouse pitch',
+      'Reduced effects',
+    ]) {
+      await user.click(controls.getByRole('checkbox', { name }));
+    }
+    expect(settings.getState().settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      masterVolume: 0.2,
+      mouseSensitivity: 1.5,
+      sfxEnabled: false,
+      musicEnabled: true,
+      mouseSteering: false,
+      invertMouseY: true,
+      reducedMotion: true,
+    });
+    expect(write).toHaveBeenCalledTimes(7);
+    expect(controls.getByRole('alert')).toHaveTextContent(
+      /could not save settings.*session/i,
+    );
+    expect(view.container.querySelector('.app-shell')).toHaveAttribute(
+      'data-reduced-effects',
+      'true',
+    );
+    await user.click(controls.getByRole('button', { name: 'Close settings' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent(/settings/i);
+  });
+
+  it.each(['dialog', 'close', 'range', 'checkbox'])(
+    'contains native keys from %s and restores paused ownership without resuming',
+    async (target) => {
+      const user = userEvent.setup();
+      const store = createAppStore();
+      const settings = createSettingsStore(() => ({
+        getItem: () => null,
+        setItem: () => {},
+      }));
+      const host = new GameHost(store, {
+        settings,
+        storage: () => ({ getItem: () => null, setItem: () => {} }),
+      });
+      // No render surface needed: host's window handler is covered by GameHost
+      // tests; this isolates dialog bubbling/containment on all four targets.
+      const setSettingsOpen = vi.spyOn(host, 'setSettingsOpen');
+      store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+      store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+      store.dispatch({ type: 'COURSE_READY' });
+      store.dispatch({ type: 'PAUSE' });
+      const view = render(
+        <App
+          store={store}
+          settings={settings}
+          host={{
+            settings,
+            setContainer: () => {},
+            setSettingsOpen,
+            unlockAudio: host.unlockAudio,
+            getAudioNotice: host.getAudioNotice,
+            subscribeAudio: host.subscribeAudio,
+            retryAudioCleanup: host.retryAudioCleanup,
+          }}
+        />,
+      );
+      try {
+        const opener = screen.getByRole('button', { name: 'Settings' });
+        await user.click(opener);
+        expect(setSettingsOpen).toHaveBeenLastCalledWith(true);
+        const dialog = screen.getByRole('dialog', { name: 'Settings' });
+        const controls = within(dialog);
+        const close = controls.getByRole('button', { name: 'Close settings' });
+        const last = controls.getByRole('checkbox', {
+          name: 'Reduced effects',
+        });
+        const focus =
+          target === 'dialog'
+            ? dialog
+            : target === 'close'
+              ? close
+              : target === 'range'
+                ? controls.getByRole('slider', { name: 'Master volume' })
+                : controls.getByRole('checkbox', { name: 'Mouse steering' });
+        focus.focus();
+        const windowKey = vi.fn();
+        window.addEventListener('keydown', windowKey);
+        try {
+          await user.keyboard(
+            target === 'close' ? '[ArrowLeft]' : '[ArrowLeft][Space]',
+          );
+          expect(windowKey).not.toHaveBeenCalled();
+          last.focus();
+          await user.tab();
+          expect(close).toHaveFocus();
+          await user.tab({ shift: true });
+          expect(last).toHaveFocus();
+          focus.focus();
+          await user.keyboard('[Escape]');
+        } finally {
+          window.removeEventListener('keydown', windowKey);
+        }
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(opener).toHaveFocus();
+        expect(store.getState().screen).toBe('paused');
+        expect(setSettingsOpen).toHaveBeenLastCalledWith(false);
+      } finally {
+        view.unmount();
+        await host.dispose();
+      }
+    },
+  );
+
+  it('unlocks only on load/resume/replay and audio-control gestures, with visible backend retry actions', async () => {
+    const user = userEvent.setup();
+    const store = createAppStore();
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    const context = new FakeContext();
+    const audio = createAudioEngine({
+      createContext: () => context,
+      isUserGesture: () => true,
+    });
+    const host = new GameHost(store, {
+      audio,
+      settings,
+      storage: () => ({ getItem: () => null, setItem: () => {} }),
+    });
+    const unlock = vi.spyOn(host, 'unlockAudio');
+    const retry = vi.spyOn(host, 'retryAudioCleanup');
+    const view = render(
+      <App
+        store={store}
+        settings={settings}
+        host={{
+          settings,
+          setContainer: () => {},
+          setSettingsOpen: host.setSettingsOpen,
+          unlockAudio: unlock,
+          getAudioNotice: host.getAudioNotice,
+          subscribeAudio: host.subscribeAudio,
+          retryAudioCleanup: retry,
+        }}
+      />,
+    );
+    try {
+      expect(unlock).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: 'Settings' }));
+      expect(unlock).not.toHaveBeenCalled();
+      await user.click(
+        screen.getByRole('checkbox', { name: 'Mouse steering' }),
+      );
+      expect(unlock).not.toHaveBeenCalled();
+      context.resumeError = new DOMException('blocked', 'NotAllowedError');
+      await user.click(screen.getByRole('checkbox', { name: 'Ambience' }));
+      expect(unlock).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('alert')).toHaveTextContent(/audio.*unlocked/i);
+      await user.click(
+        screen.getByRole('button', { name: 'Retry audio cleanup' }),
+      );
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(unlock).toHaveBeenCalledTimes(1);
+      context.resumeError = null;
+      await user.click(screen.getByRole('button', { name: 'Enable sound' }));
+      await user.click(screen.getByRole('button', { name: 'Close settings' }));
+      await user.click(screen.getByRole('button', { name: 'Dive in' }));
+      await user.click(
+        screen.getByRole('button', { name: 'Load Sunlit Shoals' }),
+      );
+      expect(unlock).toHaveBeenCalledTimes(3);
+      act(() => store.dispatch({ type: 'COURSE_READY' }));
+      await user.click(screen.getByRole('button', { name: 'Pause run' }));
+      await user.click(screen.getByRole('button', { name: 'Resume' }));
+      expect(unlock).toHaveBeenCalledTimes(4);
+      act(() =>
+        store.dispatch({
+          type: 'RUN_FINISHED',
+          result: {
+            courseId: 'sunlit-shoals',
+            elapsedMs: 1000,
+            medal: 'gold',
+            pearlCount: 1,
+            totalPearls: 1,
+          },
+        }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Race again' }));
+      expect(unlock).toHaveBeenCalledTimes(5);
+      expect(store.getState().screen).toBe('loading');
+    } finally {
+      view.unmount();
+      await host.dispose();
+    }
+  });
+
+  it('offers truthful record provenance, actual results, replay and course selection', async () => {
+    const user = userEvent.setup();
+    const store = createAppStore();
+    const result = {
+      courseId: 'sunlit-shoals',
+      elapsedMs: 21_940.483,
+      medal: 'bronze',
+      pearlCount: 4,
+      totalPearls: 4,
+    } as const;
+    const prior = parseProgress({
+      version: 1,
+      courses: {
+        'sunlit-shoals': {
+          bestElapsedMs: 25_000,
+          bestMedal: null,
+          bestPearlCount: 1,
+        },
+      },
+    });
+    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+    store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+    store.dispatch({ type: 'COURSE_READY' });
+    store.dispatch({
+      type: 'RUN_FINISHED',
+      result,
+      achievements: finishAchievements(prior, result),
+    });
+    render(<App store={store} />);
+    expect(screen.getByText('New time record')).toBeVisible();
+    expect(screen.getByText('Run complete', { exact: true })).toBeVisible();
+    expect(screen.getByText(/progress known at the finish/i)).toBeVisible();
+    expect(screen.getByText(/Kelpworks.*not yet available/i)).toBeVisible();
+    expect(screen.getByText('0:21.94')).toBeVisible();
+    expect(screen.getByText(/4 \/ 4 pearls/)).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: 'Choose another course' }),
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Choose a course' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: /Kelpworks/ })).toBeDisabled();
+  });
+
+  it('announces meaningful race feedback politely without a second status role or contact live flood', () => {
+    const store = createAppStore();
+    store.dispatch({ type: 'OPEN_COURSE_SELECT' });
+    store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
+    store.dispatch({ type: 'COURSE_READY' });
+    render(<App store={store} />);
+    act(() =>
+      store.dispatch({
+        type: 'PRESENTATION_UPDATED',
+        presentation: {
+          ...updatedPresentation,
+          feedback: {
+            cue: 'pearl',
+            text: 'Pearl collected',
+            announcement: 'Pearl collected',
+            sequence: 1,
+          },
+        },
+      }),
+    );
+    const announcement = screen.getByRole('log', { name: 'Race updates' });
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
+    expect(announcement).toHaveTextContent('Pearl collected');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    act(() =>
+      store.dispatch({
+        type: 'PRESENTATION_UPDATED',
+        presentation: {
+          ...updatedPresentation,
+          feedback: {
+            cue: 'collision',
+            text: 'A close brush',
+            announcement: null,
+            sequence: 2,
+          },
+        },
+      }),
+    );
+    expect(announcement).not.toHaveTextContent('A close brush');
+  });
+
   it('describes throttle without promising reverse propulsion', () => {
     render(<App store={createAppStore()} />);
     expect(
@@ -254,6 +623,16 @@ describe('App shell', () => {
 
   it('keeps one main-owned host across StrictMode, stable roots, buttons and actual remounts', async () => {
     const store = createAppStore();
+    const context = new FakeContext();
+    const audio = createAudioEngine({
+      createContext: () => context,
+      isUserGesture: () => true,
+    });
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    settings.update({ musicEnabled: true });
     const frames = new Map<number, FrameRequestCallback>();
     let id = 0;
     const renderer: HostRenderer = {
@@ -266,6 +645,8 @@ describe('App shell', () => {
     };
     const createRenderer = vi.fn(() => Promise.resolve(renderer));
     const host = new GameHost(store, {
+      settings,
+      audio,
       createRenderer,
       createScene: createSceneRuntime,
       loadCourse: () => Promise.resolve(parseCourseDefinition(courseFixture())),
@@ -295,6 +676,11 @@ describe('App shell', () => {
       const root = document.getElementById('game-root');
       await act(() => host.whenIdle());
       expect(store.getState().screen).toBe('playing');
+      expect(host.getSnapshot().audio).toMatchObject({
+        status: 'ready',
+        phase: 'playing',
+        activeAmbience: 1,
+      });
       expect(root?.querySelectorAll('canvas')).toHaveLength(1);
       expect(frames.size).toBe(1);
       await user.click(screen.getByRole('button', { name: 'Pause run' }));
@@ -317,6 +703,12 @@ describe('App shell', () => {
       act(() => store.dispatch({ type: 'RETURN_TO_TITLE' }));
       expect(frames.size).toBe(0);
       expect(renderer.dispose).toHaveBeenCalledOnce();
+      expect(host.getSnapshot().audio).toMatchObject({
+        phase: 'idle',
+        ownsContext: true,
+        activeEffects: 0,
+        activeAmbience: 0,
+      });
     } finally {
       view.unmount();
       await host.dispose();

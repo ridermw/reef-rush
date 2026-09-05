@@ -98,6 +98,10 @@ export function createGeneratedSceneVisuals(
 
     return Object.freeze({
       root,
+      setReducedMotion() {
+        if (disposed) throw new Error('GeneratedSceneVisuals is disposed.');
+        // This fallback has no decorative animation; all its moving poses are essential.
+      },
       present(position, orientation, race, collectedPearlIds): void {
         if (disposed) throw new Error('GeneratedSceneVisuals is disposed.');
         fish.position.copy(position);

@@ -167,9 +167,15 @@ export async function createOriginalSceneVisuals(
     });
     mixer.clipAction(swim).play();
     let animationTime = 0;
+    let reducedMotion = false;
     scene.add(root);
     return Object.freeze({
       root,
+      setReducedMotion(reduced) {
+        if (disposed) throw new Error('OriginalSceneVisuals is disposed.');
+        reducedMotion = reduced;
+        effects.setReducedMotion(reduced);
+      },
       present(
         position,
         orientation,
@@ -182,7 +188,7 @@ export async function createOriginalSceneVisuals(
         fish.root.position.copy(position);
         fish.root.quaternion.copy(orientation);
         markers.present(race, collectedPearlIds);
-        if (race.status === 'running' && frameSeconds > 0) {
+        if (!reducedMotion && race.status === 'running' && frameSeconds > 0) {
           animationTime =
             (animationTime + (frameSeconds % swim.duration)) % swim.duration;
           mixer.setTime(animationTime);

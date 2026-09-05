@@ -3,6 +3,8 @@ import type { RaceState } from '../race/raceTypes';
 
 export interface SceneVisuals {
   readonly root: Group;
+  /** Decorative motion only; authoritative player, gate and race poses remain live. */
+  setReducedMotion(reduced: boolean): void;
   present(
     position: Vector3,
     orientation: Quaternion,

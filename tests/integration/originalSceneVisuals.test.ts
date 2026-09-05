@@ -34,6 +34,57 @@ import {
 import { isSceneMesh } from '../fixtures/sceneMeshes';
 
 const owners: Array<{ dispose(): void }> = [];
+
+it('suppresses only swim and decorative particles, with live gate/marker/player poses and unchanged ownership', async () => {
+  const { scene, course, cache, createOriginalSceneVisuals } = await setup();
+  const visuals = await createOriginalSceneVisuals(scene, course, cache);
+  owners.push(visuals);
+  const counts = visuals.getResourceCounts();
+  const race = new RaceSession(course.definition);
+  race.start();
+  visuals.present(new Vector3(), new Quaternion(), race.getState(), [], 0.13);
+  const tail = scene.getObjectByName('fin-tail')!;
+  const bubbles = scene.getObjectByName('ambient-bubbles')!;
+  const flow = scene.getObjectByName('current-particles')!;
+  const poses = () =>
+    [tail, ...bubbles.children, ...flow.children].map((node) => [
+      ...node.position.toArray(),
+      ...node.quaternion.toArray(),
+    ]);
+  const before = poses();
+  expect(typeof visuals.setReducedMotion).toBe('function');
+  visuals.setReducedMotion(true);
+  expect(bubbles.visible).toBe(false);
+  expect(flow.visible).toBe(false);
+  const gate = course.obstacles.find(
+    (obstacle) => obstacle instanceof RotatingGate,
+  )!;
+  gate.body.setTranslation({ x: 3, y: -2, z: 51 }, true);
+  race.step([0, -4, 11], [0, -4, 13], 0.1);
+  visuals.present(
+    new Vector3(2, -3, 4),
+    new Quaternion(),
+    race.getState(),
+    ['pearl-entry'],
+    0.5,
+  );
+  expect(poses()).toEqual(before);
+  expect(getMesh(scene, 'sway-beam').position.toArray()).toEqual([3, -2, 51]);
+  expect(scene.getObjectByName('player-fish')?.position.toArray()).toEqual([
+    2, -3, 4,
+  ]);
+  expect(getMesh(scene, 'shoals-entry').userData.checkpointState).toBe(
+    'completed',
+  );
+  expect(getMesh(scene, 'pearl-entry').visible).toBe(false);
+  expect(visuals.getResourceCounts()).toEqual(counts);
+  visuals.setReducedMotion(false);
+  expect(bubbles.visible).toBe(true);
+  visuals.present(new Vector3(), new Quaternion(), race.getState(), [], 0.1);
+  expect(poses()).not.toEqual(before);
+  visuals.dispose();
+  expect(visuals.getResourceCounts()).toEqual({ geometries: 0, materials: 0 });
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const owner of owners.splice(0).reverse()) owner.dispose();

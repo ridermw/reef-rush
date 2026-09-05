@@ -23,6 +23,11 @@ import {
 } from '../../src/game/progression/progress';
 import { courseFixture } from '../fixtures/courseDefinition';
 import { generatedSunlit } from '../fixtures/sunlitTraversal';
+import { createAudioEngine } from '../../src/game/audio/AudioEngine';
+import { FakeContext } from '../fixtures/audioContext';
+import { createSettingsStore } from '../../src/settings/SettingsStore';
+import { DEFAULT_SETTINGS } from '../../src/settings/settings';
+import { InputController } from '../../src/game/input/InputController';
 
 const hosts: Array<Pick<GameHost, 'dispose' | 'retryCleanup'>> = [];
 const scenes: SceneRuntime[] = [];
@@ -176,6 +181,141 @@ afterEach(async () => {
 });
 
 describe('GameHost real-scene ownership', () => {
+  it('owns live system reduced motion, combines the explicit flag, and propagates through pause and pending load', async () => {
+    const media = Object.assign(new EventTarget(), { matches: false });
+    const add = vi.spyOn(media, 'addEventListener');
+    const remove = vi.spyOn(media, 'removeEventListener');
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => media),
+    );
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    const gate = deferred<void>();
+    const h = await setup({
+      settings,
+      loadCourse: async () => {
+        await gate.promise;
+        return definition();
+      },
+    });
+    const pending = h.load();
+    settings.update({ reducedMotion: true });
+    gate.resolve();
+    await pending;
+    const runtime = h.runtimes[0];
+    expect(h.host.getSnapshot().preferences).toEqual({
+      ...DEFAULT_SETTINGS,
+      reducedMotion: true,
+    });
+    const apply = vi.spyOn(runtime, 'setReducedMotion');
+    h.store.dispatch({ type: 'PAUSE' });
+    const before = runtime.getSnapshot();
+    const resources = runtime.getDiagnostics();
+    const dispatch = vi.spyOn(h.store, 'dispatch');
+    settings.update({ reducedMotion: false });
+    expect(apply).toHaveBeenLastCalledWith(false);
+    media.matches = true;
+    media.dispatchEvent(new Event('change'));
+    expect(apply).toHaveBeenLastCalledWith(true);
+    expect(h.host.getSnapshot().preferences.reducedMotion).toBe(true);
+    settings.update({ reducedMotion: true });
+    media.matches = false;
+    media.dispatchEvent(new Event('change'));
+    expect(apply).toHaveBeenLastCalledWith(true);
+    expect(runtime.getSnapshot()).toEqual(before);
+    expect(runtime.getDiagnostics()).toEqual(resources);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(add).toHaveBeenCalledTimes(1);
+    await h.host.dispose();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0]).toEqual(add.mock.calls[0]);
+    apply.mockClear();
+    media.dispatchEvent(new Event('change'));
+    settings.update({ reducedMotion: false });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('applies complete subscribed preferences to existing and newly attached input without frame dispatch', async () => {
+    const settings = createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+    const inputs: InputController[] = [];
+    const h = await setup({
+      settings,
+      createInput: (canvas, isPlaying) => {
+        const input = new InputController(window, {
+          pointerSurface: canvas,
+          isPlaying,
+        });
+        inputs.push(input);
+        return input;
+      },
+    });
+    settings.update({
+      mouseSteering: false,
+      mouseSensitivity: 2,
+      invertMouseY: true,
+    });
+    await h.load();
+    const apply = vi.spyOn(inputs[0], 'setPreferences');
+    const dispatch = vi.spyOn(h.store, 'dispatch');
+    settings.update({ mouseSensitivity: 0.25 });
+    expect(apply).toHaveBeenCalledExactlyOnceWith({
+      mouseSteering: false,
+      mouseSensitivity: 0.25,
+      invertMouseY: true,
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    const previous = h.host.getSnapshot();
+    expect(previous.preferences).toEqual(settings.getState().settings);
+    expect(Object.isFrozen(previous.preferences)).toBe(true);
+    h.host.setContainer(null);
+    const set = vi.spyOn(InputController.prototype, 'setPreferences');
+    h.host.setContainer(h.container);
+    expect(set).toHaveBeenCalledWith({
+      mouseSteering: false,
+      mouseSensitivity: 0.25,
+      invertMouseY: true,
+    });
+    await h.host.dispose();
+    set.mockClear();
+    settings.update({ mouseSteering: true });
+    expect(set).not.toHaveBeenCalled();
+    expect(previous.preferences.mouseSteering).toBe(false);
+  });
+
+  it('explicit modal ownership and prevented Escape block host resume and gameplay keys', async () => {
+    const h = await setup();
+    await h.load();
+    h.host.setSettingsOpen(true);
+    const before = h.host.getSnapshot();
+    key('Space');
+    key('ArrowUp');
+    h.frame(17);
+    expect(h.host.getSnapshot().player?.dashEnergy).toBe(
+      before.player?.dashEnergy,
+    );
+    h.host.setSettingsOpen(false);
+    h.store.dispatch({ type: 'PAUSE' });
+    const event = new KeyboardEvent('keydown', {
+      code: 'Escape',
+      cancelable: true,
+    });
+    event.preventDefault();
+    window.dispatchEvent(event);
+    expect(h.store.getState().screen).toBe('paused');
+    h.host.setSettingsOpen(true);
+    key('Escape');
+    expect(h.store.getState().screen).toBe('paused');
+    h.host.setSettingsOpen(false);
+    key('Escape');
+    expect(h.store.getState().screen).toBe('playing');
+  });
+
   it('pauses for back-forward cache navigation and retains a resumable owner', async () => {
     const h = await setup();
     await h.load();
@@ -1233,6 +1373,53 @@ describe('coordinated monotonic persistence through real finishes', () => {
 });
 
 describe('terminal progress and diagnostics', () => {
+  it('captures finish knowledge before a queued save discovers a better cross-tab record', async () => {
+    const gate = deferred<void>();
+    const h = await setup({
+      loadCourse: () => Promise.resolve(definition(true)),
+      coordinateProgress: async (save) => {
+        await gate.promise;
+        save();
+      },
+    });
+    await h.load();
+    key('KeyW');
+    h.frame(100);
+    const provenance = h.store.getState().achievements;
+    try {
+      expect(provenance).toMatchObject({
+        firstCompletion: true,
+        newTimeRecord: false,
+        previousBest: null,
+        newlyUnlocked: ['kelpworks'],
+      });
+      expect(Object.isFrozen(provenance)).toBe(true);
+      h.storage.set(
+        PROGRESS_STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          courses: {
+            'sunlit-shoals': {
+              bestElapsedMs: 0.00001,
+              bestMedal: 'gold',
+              bestPearlCount: 4,
+            },
+          },
+        }),
+      );
+    } finally {
+      gate.resolve();
+    }
+    await h.host.whenIdle();
+    expect(
+      h.store.getState().progress?.courses['sunlit-shoals']?.bestElapsedMs,
+    ).toBe(0.00001);
+    expect(h.store.getState().achievements).toBe(provenance);
+    expect(provenance?.bestAtFinish.bestElapsedMs).toBe(
+      h.store.getState().result?.elapsedMs,
+    );
+  });
+
   it('persists a generated Sunlit finish through real scene, loader, timing and progression', async () => {
     const { loadCourseDefinition } =
       await import('../../src/game/course/loadCourseDefinition');
@@ -1256,6 +1443,7 @@ describe('terminal progress and diagnostics', () => {
       createInput: () => ({
         clear: () => {},
         destroy: () => {},
+        setPreferences: () => {},
         readFrame: () => {
           const fish = h.host.getSnapshot().player!;
           if (
@@ -1285,6 +1473,7 @@ describe('terminal progress and diagnostics', () => {
         },
       }),
     });
+
     await h.load();
     for (
       let frame = 0;
@@ -1309,6 +1498,363 @@ describe('terminal progress and diagnostics', () => {
       'sunlit-shoals',
       'kelpworks',
     ]);
+  });
+
+  describe('host-owned optional audio and step feedback', () => {
+    function audioFixture() {
+      const context = new FakeContext();
+      const construct = vi.fn(() => context);
+      const audio = createAudioEngine({
+        createContext: construct,
+        isUserGesture: () => true,
+      });
+      const settings = createSettingsStore(() => ({
+        getItem: () => null,
+        setItem: () => {},
+      }));
+      settings.update({ musicEnabled: true });
+      return { audio, context, construct, settings };
+    }
+
+    it('unlocks synchronously from a gesture, reuses one context across three runtimes, and silences navigation', async () => {
+      const f = audioFixture();
+      const h = await setup(f);
+      expect(f.construct).not.toHaveBeenCalled();
+      for (let cycle = 0; cycle < 3; cycle++) {
+        const unlocking = h.host.unlockAudio();
+        expect(f.construct).toHaveBeenCalledTimes(1);
+        await h.load();
+        await unlocking;
+        expect(h.host.getSnapshot().audio).toMatchObject({
+          status: 'ready',
+          activeAmbience: 1,
+        });
+        key('Space');
+        h.frame(17);
+        expect(h.host.getSnapshot().audio.emittedCues.dash).toBe(cycle + 1);
+        h.store.dispatch({ type: 'PAUSE' });
+        expect(h.host.getSnapshot().audio).toMatchObject({
+          activeEffects: 0,
+          activeAmbience: 0,
+        });
+        h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+        expect(h.host.getSnapshot().audio).toMatchObject({
+          phase: 'idle',
+          ownedNodes: 1,
+          ownsContext: true,
+        });
+      }
+      await h.host.dispose();
+      expect(f.context.closeCalls).toBe(1);
+    });
+
+    it('consumes every step event before terminal transition, with one immediate prioritized publication', async () => {
+      const f = audioFixture();
+      const h = await setup(f);
+      await h.host.unlockAudio();
+      await h.load();
+      const runtime = h.runtimes[0];
+      const realStep = runtime.step.bind(runtime);
+      let count = 0;
+      vi.spyOn(runtime, 'step').mockImplementation((input, dt) => {
+        const step = realStep(input, dt);
+        count++;
+        f.context.currentTime += 0.1;
+        if (count === 1)
+          return {
+            ...step,
+            fishEvents: [
+              { type: 'dash' },
+              { type: 'hazard-entered', colliderHandle: 1 },
+            ],
+            raceEvents: [
+              { type: 'pearl', pearlId: 'one', fraction: 0.5, elapsedMs: 10 },
+            ],
+          };
+        if (count === 2)
+          return {
+            ...step,
+            fishEvents: [
+              { type: 'collision', colliderHandle: 1, normal: [0, 1, 0] },
+            ],
+            raceEvents: [
+              {
+                type: 'checkpoint',
+                checkpointId: 'one',
+                checkpointIndex: 1,
+                fraction: 1,
+                elapsedMs: 20,
+              },
+            ],
+          };
+        const result = {
+          courseId: 'sunlit-shoals',
+          elapsedMs: 30,
+          medal: 'gold',
+          pearlCount: 1,
+          totalPearls: 1,
+        } as const;
+        return {
+          ...step,
+          finished: true,
+          snapshot: {
+            ...step.snapshot,
+            race: { ...step.snapshot.race, status: 'finished', result },
+          },
+          fishEvents: [{ type: 'breach' }, { type: 'splashdown' }],
+          raceEvents: [
+            {
+              type: 'checkpoint',
+              checkpointId: 'two',
+              checkpointIndex: 2,
+              fraction: 1,
+              elapsedMs: 30,
+            },
+            { type: 'finish', result, fraction: 1, elapsedMs: 30 },
+          ],
+        };
+      });
+      const play = vi.spyOn(f.audio, 'play');
+      const dispatch = vi.spyOn(h.store, 'dispatch');
+      h.frame(100);
+      expect(count).toBe(3);
+      expect(play.mock.calls.map(([cue]) => cue)).toEqual([
+        'dash',
+        'hazard',
+        'pearl',
+        'collision',
+        'checkpoint',
+        'breach',
+        'splashdown',
+        'checkpoint',
+        'finish',
+      ]);
+      const updates = dispatch.mock.calls.filter(
+        ([action]) => action.type === 'PRESENTATION_UPDATED',
+      );
+      expect(updates).toHaveLength(1);
+      expect(h.store.getState().presentation?.feedback?.cue).toBe('finish');
+      expect(h.host.getSnapshot().audio).toMatchObject({
+        phase: 'results',
+        activeAmbience: 0,
+        activeEffects: 1,
+        emittedCues: { finish: 1, checkpoint: 2 },
+      });
+      h.frame(100);
+      expect(play).toHaveBeenCalledTimes(9);
+      h.store.dispatch({ type: 'REPLAY' });
+      await h.host.whenIdle();
+      expect(h.host.getSnapshot()).toMatchObject({
+        feedback: null,
+        frame: { steps: 0, rendered: 0 },
+      });
+      expect(h.store.getState()).toMatchObject({
+        result: null,
+        achievements: null,
+      });
+    });
+
+    it('consumes pause-step events before silencing, and retains the 10Hz HUD limit under contact load', async () => {
+      const f = audioFixture();
+      const h = await setup(f);
+      await h.host.unlockAudio();
+      await h.load();
+      const step = h.runtimes[0].step.bind(h.runtimes[0]);
+      vi.spyOn(h.runtimes[0], 'step').mockImplementation((input, dt) => ({
+        ...step(input, dt),
+        fishEvents: [
+          { type: 'collision', colliderHandle: 1, normal: [0, 1, 0] },
+        ],
+        raceEvents: [],
+      }));
+      const play = vi.spyOn(f.audio, 'play');
+      const dispatch = vi.spyOn(h.store, 'dispatch');
+      for (let i = 0; i < 125; i++) h.frame(8);
+      expect(play.mock.calls.length).toBe(h.host.getSnapshot().frame.steps);
+      expect(
+        dispatch.mock.calls.filter(
+          ([action]) => action.type === 'PRESENTATION_UPDATED',
+        ).length,
+      ).toBeLessThanOrEqual(10);
+      expect(
+        h.store.getState().presentation?.feedback?.announcement,
+      ).toBeNull();
+      key('Escape');
+      h.frame(17);
+      expect(play.mock.calls.length).toBe(h.host.getSnapshot().frame.steps);
+      expect(h.store.getState().screen).toBe('paused');
+      expect(f.audio.getState().activeEffects).toBe(0);
+    });
+
+    it.each(['blur', 'visibilitychange', 'pagehide'])(
+      'silences finish voices on %s even on results',
+      async (event) => {
+        const f = audioFixture();
+        const h = await setup({
+          ...f,
+          loadCourse: () => Promise.resolve(definition(true)),
+        });
+        await h.host.unlockAudio();
+        await h.load();
+        key('KeyW');
+        h.frame(100);
+        expect(f.audio.getState().activeEffects).toBe(1);
+        if (event === 'visibilitychange') {
+          vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+          document.dispatchEvent(new Event(event));
+        } else if (event === 'pagehide') {
+          window.dispatchEvent(
+            new PageTransitionEvent(event, { persisted: true }),
+          );
+        } else window.dispatchEvent(new Event(event));
+        expect(f.audio.getState()).toMatchObject({
+          activeEffects: 0,
+          activeAmbience: 0,
+        });
+        expect(h.store.getState().screen).toBe('results');
+      },
+    );
+
+    it('does not start ambience even briefly when a hidden pending load reaches COURSE_READY', async () => {
+      const f = audioFixture();
+      const gate = deferred<void>();
+      const h = await setup({
+        ...f,
+        loadCourse: async () => {
+          await gate.promise;
+          return definition();
+        },
+      });
+      await h.host.unlockAudio();
+      const loading = h.load();
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      document.dispatchEvent(new Event('visibilitychange'));
+      gate.resolve();
+      await loading;
+      expect(h.store.getState().screen).toBe('paused');
+      expect(f.context.oscillators).toHaveLength(0);
+      expect(f.audio.getState().activeAmbience).toBe(0);
+    });
+
+    it('starts close before a withheld save or resume, retains failed audio independently, and supports explicit retry', async () => {
+      const f = audioFixture();
+      const saveGate = deferred<void>();
+      const resumeGate = deferred<void>();
+      const h = await setup({
+        ...f,
+        loadCourse: () => Promise.resolve(definition(true)),
+        coordinateProgress: async (save) => {
+          await saveGate.promise;
+          save();
+        },
+      });
+      await h.host.unlockAudio();
+      await h.load();
+      key('KeyW');
+      h.frame(100);
+      expect(f.audio.getState().activeEffects).toBe(1);
+      f.context.state = 'suspended';
+      f.context.resumeGate = resumeGate;
+      const resume = h.host.unlockAudio();
+      f.context.closeError = new Error('close withheld');
+      let settled = false;
+      const disposal = h.host.dispose();
+      const observed = disposal.then(
+        () => {
+          settled = true;
+          return null;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      try {
+        expect(f.context.closeCalls).toBe(1);
+        expect(f.audio.getState()).toMatchObject({
+          activeEffects: 0,
+          activeAmbience: 0,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        expect(h.storage.has(PROGRESS_STORAGE_KEY)).toBe(false);
+        expect(h.host.getSnapshot()).toMatchObject({
+          cleanupError: null,
+          resources: { pendingCleanup: 0 },
+          audio: { status: 'failed', ownsContext: true, pendingCleanup: true },
+        });
+      } finally {
+        saveGate.resolve();
+        resumeGate.resolve();
+      }
+      await resume;
+      expect(await observed).toBeInstanceOf(Error);
+      expect(h.storage.has(PROGRESS_STORAGE_KEY)).toBe(true);
+      expect(h.host.getAudioNotice()).toMatch(/cleanup/i);
+      f.context.closeError = null;
+      await h.host.retryAudioCleanup();
+      expect(h.host.getSnapshot().audio).toMatchObject({
+        status: 'disposed',
+        ownsContext: false,
+        pendingCleanup: false,
+      });
+      await expect(h.host.dispose()).resolves.toBeUndefined();
+      expect(f.context.closeCalls).toBe(2);
+    });
+
+    it('clears a failed live audio retry when terminal disposal releases every owner', async () => {
+      const f = audioFixture();
+      const h = await setup(f);
+      await h.host.unlockAudio();
+      await h.load();
+      key('Space');
+      h.frame(17);
+      const oscillator = f.context.oscillators.at(-1)!;
+      oscillator.disconnectError = new Error('disconnect failed');
+      h.store.dispatch({ type: 'PAUSE' });
+      await expect(h.host.retryAudioCleanup()).rejects.toBeInstanceOf(
+        AggregateError,
+      );
+      expect(f.audio.getState().pendingCleanup).toBe(true);
+
+      oscillator.disconnectError = null;
+      try {
+        await expect(h.host.dispose()).resolves.toBeUndefined();
+        expect(h.host.getSnapshot().audio).toMatchObject({
+          status: 'disposed',
+          ownsContext: false,
+          ownedNodes: 0,
+          pendingCleanup: false,
+        });
+        await expect(h.host.dispose()).resolves.toBeUndefined();
+        expect(f.context.closeCalls).toBe(1);
+      } finally {
+        await h.host.retryAudioCleanup();
+      }
+    });
+
+    it('does not block course loading on optional failed node cleanup and exposes a retry notice', async () => {
+      const f = audioFixture();
+      const h = await setup(f);
+      await h.host.unlockAudio();
+      await h.load();
+      key('Space');
+      h.frame(17);
+      const oscillator = f.context.oscillators.at(-1)!;
+      oscillator.disconnectError = new Error('disconnect failed');
+      h.store.dispatch({ type: 'RETURN_TO_TITLE' });
+      expect(h.host.getSnapshot().audio.pendingCleanup).toBe(true);
+      expect(h.host.getAudioNotice()).toMatch(/audio/i);
+      expect(h.host.getSnapshot().cleanupError).toBeNull();
+      await h.load();
+      expect(h.store.getState().screen).toBe('playing');
+      oscillator.disconnectError = null;
+      await h.host.retryAudioCleanup();
+      expect(f.audio.getState().pendingCleanup).toBe(false);
+      await h.host.unlockAudio();
+      expect(f.audio.getState().status).toBe('ready');
+    });
   });
 
   it('finishes inside catchup, saves actual results and renders final state without stepping again', async () => {

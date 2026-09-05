@@ -16,12 +16,12 @@ export function CourseSelectScreen({
   return (
     <main className="screen screen--course-select">
       <section className="hero-panel hero-panel--compact">
-        <p className="eyebrow">Solo time trial</p>
+        <p className="eyebrow">Chart your next expedition</p>
         <div className="panel-heading">
           <h1>Choose a course</h1>
           <p>
-            Race through Sunlit Shoals. Earn a medal to unlock eligibility for
-            the next route as more courses become available.
+            Warm shallows today. Wilder waters ahead. Earn a medal in Sunlit
+            Shoals to qualify for the next expedition.
           </p>
         </div>
       </section>

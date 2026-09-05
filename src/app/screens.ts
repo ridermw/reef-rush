@@ -1,6 +1,8 @@
 import type { CourseId } from '../content/courses/courseIds';
 import type { FinishedRaceResult } from '../game/race/raceTypes';
 import type { Progress } from '../game/progression/progress';
+import type { FinishAchievements } from '../game/progression/finishAchievements';
+import type { RunFeedback } from '../game/core/runFeedback';
 
 export type AppScreen =
   | 'title'
@@ -17,6 +19,7 @@ export interface AppPresentation {
   checkpointIndex: number;
   checkpointCount: number;
   pearlCount: number;
+  feedback?: RunFeedback | null;
 }
 
 export interface AppState {
@@ -24,6 +27,7 @@ export interface AppState {
   selectedCourseId: CourseId | null;
   presentation: AppPresentation | null;
   result: FinishedRaceResult | null;
+  achievements: FinishAchievements | null;
   error: { title: string; detail: string } | null;
   progress: Progress | null;
   progressNotice: string | null;

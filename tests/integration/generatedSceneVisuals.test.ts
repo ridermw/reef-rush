@@ -20,6 +20,33 @@ import { createGeneratedSceneVisuals } from '../../src/game/rendering/createGene
 import { isSceneMesh } from '../fixtures/sceneMeshes';
 
 const resources: Array<{ dispose(): void }> = [];
+
+it('accepts reduced motion without hiding essential generated fish, gates or checkpoints', async () => {
+  const { course, scene } = await setup();
+  const visuals = createGeneratedSceneVisuals(scene, course);
+  resources.push(visuals);
+  const counts = visuals.getResourceCounts();
+  expect(typeof visuals.setReducedMotion).toBe('function');
+  visuals.setReducedMotion(true);
+  const race = new RaceSession(course.definition);
+  race.start();
+  visuals.present(
+    new Vector3(1, -2, 3),
+    new Quaternion(),
+    race.getState(),
+    [],
+    0.1,
+  );
+  expect(scene.getObjectByName('player-fish')?.position.toArray()).toEqual([
+    1, -2, 3,
+  ]);
+  expect(scene.getObjectByName('player-fish')?.visible).toBe(true);
+  expect(getMesh(scene, 'shoals-entry').visible).toBe(true);
+  expect(getMesh(scene, 'sway-beam').visible).toBe(true);
+  expect(visuals.getResourceCounts()).toEqual(counts);
+  visuals.dispose();
+  expect(visuals.getResourceCounts()).toEqual({ geometries: 0, materials: 0 });
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const resource of resources.splice(0).reverse()) resource.dispose();

@@ -25,6 +25,18 @@ import type {
 import { FixedStepRunner } from './fixedStep';
 import { ConstructionCleanupError, releaseResources } from './resourceCleanup';
 import { exposeGameHost } from './exposeGameHost';
+import {
+  createSettingsStore,
+  type SettingsStore,
+} from '../../settings/SettingsStore';
+import type { Settings } from '../../settings/settings';
+import {
+  createAudioEngine,
+  type AudioEngine,
+  type AudioSnapshot,
+} from '../audio/AudioEngine';
+import { createRunFeedback, type RunFeedback } from './runFeedback';
+import { finishAchievements } from '../progression/finishAchievements';
 
 export type HostRenderer = Pick<
   WebGLRenderer,
@@ -37,10 +49,12 @@ export type HostRenderer = Pick<
 >;
 export type HostInput = Pick<
   InputController,
-  'readFrame' | 'clear' | 'destroy'
+  'readFrame' | 'clear' | 'destroy' | 'setPreferences'
 >;
 
 export interface GameHostDependencies {
+  readonly settings?: SettingsStore;
+  readonly audio?: AudioEngine;
   readonly createRenderer?: () => Promise<HostRenderer>;
   readonly createInput?: (
     canvas: HTMLCanvasElement,
@@ -67,6 +81,9 @@ export interface GameHostDependencies {
 }
 
 export interface HostSnapshot {
+  readonly preferences: Settings;
+  readonly audio: AudioSnapshot;
+  readonly feedback: RunFeedback | null;
   readonly screen: AppScreen;
   readonly player: SceneFishState | null;
   readonly race: RaceState | null;
@@ -110,6 +127,15 @@ async function coordinateProgress(save: () => void): Promise<void> {
 
 /** One long-lived owner per app store, independent of React's screen/remount lifetime. */
 export class GameHost {
+  readonly settings: SettingsStore;
+  private readonly audio: AudioEngine;
+  private readonly unsubscribeSettings: () => void;
+  private readonly motionQuery: MediaQueryList | null;
+  private audioShutdown: Promise<void> | null = null;
+  private audioCleanupError: unknown = null;
+  private settingsOpen = false;
+  private loadingStartsPaused = false;
+  private readonly feedback = createRunFeedback();
   private container: HTMLElement | null = null;
   private scene: SceneRuntime | null = null;
   private renderer: HostRenderer | null = null;
@@ -146,6 +172,18 @@ export class GameHost {
     private readonly store: AppStore,
     private readonly deps: GameHostDependencies = {},
   ) {
+    this.settings = deps.settings ?? createSettingsStore();
+    this.motionQuery =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    this.motionQuery?.addEventListener(
+      'change',
+      this.applyPresentationPreferences,
+    );
+    this.audio = deps.audio ?? createAudioEngine();
+    this.audio.setSettings(this.settings.getState().settings);
+    this.unsubscribeSettings = this.settings.subscribe(this.applySettings);
     this.requestFrame =
       deps.requestFrame ??
       ((callback) => window.requestAnimationFrame(callback));
@@ -178,6 +216,57 @@ export class GameHost {
     }
   }
 
+  readonly setSettingsOpen = (open: boolean): void => {
+    this.settingsOpen = open;
+    this.input?.clear();
+  };
+
+  /** Must be called directly in the trusted event, never from a render or effect. */
+  readonly unlockAudio = (): Promise<AudioSnapshot> => this.audio.unlock();
+  readonly getAudioNotice = (): string | null => this.audio.getState().notice;
+  readonly subscribeAudio = (listener: () => void): (() => void) =>
+    this.audio.subscribe(listener);
+
+  readonly retryAudioCleanup = async (): Promise<void> => {
+    try {
+      await this.audio.retryCleanup();
+      this.audioCleanupError = null;
+    } catch (error) {
+      this.audioCleanupError = error;
+      throw error;
+    }
+  };
+
+  private readonly applySettings = (): void => {
+    const settings = this.settings.getState().settings;
+    this.audio.setSettings(settings);
+    this.applyInputPreferences();
+    this.applyPresentationPreferences();
+  };
+
+  private effectivePreferences(): Settings {
+    const settings = this.settings.getState().settings;
+    return Object.freeze({
+      ...settings,
+      reducedMotion:
+        settings.reducedMotion || this.motionQuery?.matches === true,
+    });
+  }
+
+  private readonly applyPresentationPreferences = (): void => {
+    this.scene?.setReducedMotion(this.effectivePreferences().reducedMotion);
+  };
+
+  private applyInputPreferences(): void {
+    const { mouseSteering, mouseSensitivity, invertMouseY } =
+      this.settings.getState().settings;
+    this.input?.setPreferences({
+      mouseSteering,
+      mouseSensitivity,
+      invertMouseY,
+    });
+  }
+
   /** Stable React ref callback. Detaching suspends the surface, not its retry owner. */
   readonly setContainer = (container: HTMLElement | null): void => {
     if (this.container === container) return;
@@ -189,7 +278,8 @@ export class GameHost {
       this.stopFrame();
       this.releaseSurface();
       if (!container) {
-        this.autoPause();
+        // A StrictMode ref probe or title unmount is not a window focus loss.
+        if (this.scene) this.autoPause();
         return;
       }
       if (this.scene && this.renderer) {
@@ -229,8 +319,23 @@ export class GameHost {
   async dispose(): Promise<void> {
     if (!this.disposed) {
       this.disposed = true;
+      // Observe rejection immediately, independently of synchronous runtime releases
+      // and the potentially withheld cross-tab progress transaction.
+      this.audioShutdown = this.audio.dispose().then(
+        () => {
+          this.audioCleanupError = null;
+        },
+        (error: unknown) => {
+          this.audioCleanupError = error;
+        },
+      );
       this.generation += 1;
       this.unsubscribe();
+      this.unsubscribeSettings();
+      this.motionQuery?.removeEventListener(
+        'change',
+        this.applyPresentationPreferences,
+      );
       window.removeEventListener('pagehide', this.onPageHide);
       this.removeHook?.();
       this.removeHook = undefined;
@@ -242,17 +347,33 @@ export class GameHost {
       }
     }
     await this.whenIdle();
+    await this.audioShutdown;
+    const errors: unknown[] = [];
     if (this.pendingReleases.length) {
-      throw new Error(
-        'GameHost cleanup is pending; retain this host and call retryCleanup().',
-        { cause: this.lastCleanupError },
+      errors.push(
+        new Error(
+          'GameHost cleanup is pending; retain this host and call retryCleanup().',
+          { cause: this.lastCleanupError },
+        ),
       );
     }
+    if (this.audioCleanupError !== null || this.audio.getState().pendingCleanup)
+      errors.push(
+        new Error(
+          'Audio cleanup is pending; retain this host and call retryAudioCleanup().',
+          { cause: this.audioCleanupError },
+        ),
+      );
+    if (errors.length)
+      throw new AggregateError(errors, 'GameHost cleanup is pending.');
   }
 
   getSnapshot(): HostSnapshot {
     const snapshot = this.scene?.getSnapshot();
     return frozenCopy({
+      preferences: this.effectivePreferences(),
+      audio: this.audio.getSnapshot(),
+      feedback: this.feedback.getState(this.now()),
       screen: this.store.getState().screen,
       player: snapshot?.fish ?? null,
       race: snapshot?.race ?? null,
@@ -290,14 +411,20 @@ export class GameHost {
     try {
       switch (state.screen) {
         case 'loading':
+          this.audio.setPhase('idle');
+          this.feedback.clear();
           if (this.container) this.queueLoad();
           break;
         case 'paused':
+          this.audio.setPhase('paused');
           if (this.scene?.getSnapshot().race.status === 'running')
             this.scene.pause();
           this.resetTimingAndInput();
           break;
         case 'playing':
+          this.audio.setPhase(
+            this.loadingStartsPaused || document.hidden ? 'paused' : 'playing',
+          );
           if (this.scene?.getSnapshot().race.status === 'paused') {
             this.scene.resume();
             this.resetTimingAndInput();
@@ -305,9 +432,11 @@ export class GameHost {
           }
           break;
         case 'results':
+          this.audio.setPhase('results');
           this.resetTimingAndInput();
           break;
         default:
+          this.audio.setPhase('idle');
           this.generation += 1;
           this.cleanupCurrent();
       }
@@ -378,6 +507,7 @@ export class GameHost {
         return;
       }
       this.scene = scene;
+      this.applyPresentationPreferences();
       this.renderer = renderer;
       this.rendered = 0;
       this.steps = 0;
@@ -389,7 +519,9 @@ export class GameHost {
       scene.start();
       this.resetTimingAndInput();
       this.lastHudTime = this.lastTime;
+      this.loadingStartsPaused = startPaused;
       this.store.dispatch({ type: 'COURSE_READY' });
+      this.loadingStartsPaused = false;
       this.publishPresentation(scene.getSnapshot());
       if (startPaused) this.autoPause();
       this.scheduleFrame();
@@ -426,9 +558,13 @@ export class GameHost {
       this.deps.createInput ??
       ((surface, isPlaying) =>
         new InputController(window, { pointerSurface: surface, isPlaying }))
-    )(canvas, () => this.store.getState().screen === 'playing');
+    )(
+      canvas,
+      () => !this.settingsOpen && this.store.getState().screen === 'playing',
+    );
     this.input = input;
     this.surfaceReleases.push(() => input.destroy());
+    this.applyInputPreferences();
     window.addEventListener('blur', this.autoPause);
     this.surfaceReleases.push(() =>
       window.removeEventListener('blur', this.autoPause),
@@ -489,6 +625,7 @@ export class GameHost {
   }
 
   private readonly autoPause = (): void => {
+    this.audio.setPhase('paused');
     if (this.store.getState().screen === 'playing' && this.scene) {
       this.store.dispatch({ type: 'PAUSE' });
     }
@@ -509,7 +646,13 @@ export class GameHost {
   };
 
   private readonly onPausedKey = (event: KeyboardEvent): void => {
-    if (isPauseKeyEvent(event) && this.store.getState().screen === 'paused') {
+    if (
+      !event.defaultPrevented &&
+      !this.settingsOpen &&
+      isPauseKeyEvent(event) &&
+      this.store.getState().screen === 'paused'
+    ) {
+      void this.unlockAudio();
       this.store.dispatch({ type: 'RESUME' });
     }
   };
@@ -549,6 +692,12 @@ export class GameHost {
             throw new Error('Playing runtime has no input owner.');
           const step = scene.step(this.input.readFrame(), stepSeconds);
           this.steps += 1;
+          for (const cue of this.feedback.consume(
+            step.fishEvents,
+            step.raceEvents,
+            timestamp,
+          ))
+            this.audio.play(cue);
           if (step.pauseRequested) {
             this.publishPresentation(step.snapshot);
             this.store.dispatch({ type: 'PAUSE' });
@@ -598,6 +747,7 @@ export class GameHost {
         checkpointCount: snapshot.race.checkpointCount,
         pearlCount: snapshot.race.pearlCount,
         dashRatio: snapshot.fish.dashEnergy,
+        feedback: this.feedback.getState(this.now()),
       },
     });
   }
@@ -611,12 +761,13 @@ export class GameHost {
   }
 
   private finish(result: FinishedRaceResult): void {
+    const achievements = finishAchievements(this.progress, result);
     this.progress = updateProgress(this.progress, result);
     this.notice ??= 'Session-only progress: save pending.';
     // Earned progress belongs to the host, not the scene/navigation generation.
     this.saveTail = this.saveTail.then(() => this.persistProgress());
     this.publishProgress();
-    this.store.dispatch({ type: 'RUN_FINISHED', result });
+    this.store.dispatch({ type: 'RUN_FINISHED', result, achievements });
   }
 
   private async persistProgress(): Promise<void> {
@@ -716,6 +867,7 @@ export class GameHost {
 
   private fail(error: unknown): void {
     if (this.reportingError) return;
+    this.audio.setPhase('idle');
     this.retainConstruction(error);
     this.reportingError = true;
     this.generation += 1;

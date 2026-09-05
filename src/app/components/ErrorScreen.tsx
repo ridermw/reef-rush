@@ -12,7 +12,7 @@ export function ErrorScreen({
   return (
     <main className="screen screen--error">
       <section className="overlay-card overlay-card--error">
-        <p className="eyebrow">Shell error</p>
+        <p className="eyebrow">A change of tide</p>
         <h1>{title}</h1>
         <p>{detail}</p>
         <button

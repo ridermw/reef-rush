@@ -10,7 +10,7 @@ dd {
 
 .app-shell {
   min-height: 100vh;
-  padding: 2rem 1.25rem 3rem;
+  padding: 1.5rem 1.25rem;
 }
 
 .screen {
@@ -35,10 +35,9 @@ dd {
 .hud-shell,
 .course-card {
   border: 1px solid var(--color-line);
-  border-radius: 1.5rem;
+  border-radius: 0.75rem;
   background: var(--color-panel);
-  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.28);
-  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 30px #071d2526;
 }
 
 .hero-panel,
@@ -49,7 +48,7 @@ dd {
 
 .hero-panel {
   display: grid;
-  gap: 1.75rem;
+  gap: 1.5rem;
   align-items: end;
 }
 
@@ -59,7 +58,9 @@ dd {
 
 .hero-copy {
   display: grid;
-  gap: 1rem;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 2rem;
+  align-items: center;
 }
 
 .wordmark-kicker,
@@ -74,26 +75,24 @@ dd {
 
 .eyebrow {
   color: var(--color-reef);
-  font-size: 0.85rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .wordmark {
-  font-size: clamp(3rem, 11vw, 6.5rem);
-  line-height: 0.92;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-family: Georgia, 'Palatino Linotype', 'Book Antiqua', serif;
+  font-size: clamp(3rem, 8vw, 6.5rem);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.065em;
   color: var(--color-foam);
-  text-shadow:
-    0 0 18px rgba(56, 189, 248, 0.2),
-    0 18px 48px rgba(2, 6, 23, 0.34);
 }
 
 .hero-pitch {
-  max-width: 42rem;
-  font-size: 1.125rem;
+  max-width: 30rem;
+  font-size: 1rem;
   color: var(--color-copy);
 }
 
@@ -113,17 +112,17 @@ dd {
 
 .controls-grid {
   display: grid;
-  gap: 0.85rem;
-  margin-top: 1.25rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin-top: 1rem;
 }
 
 .controls-row {
   display: grid;
   gap: 0.25rem;
-  padding: 1rem 1.1rem;
-  border-radius: 1rem;
-  background: rgba(8, 38, 59, 0.64);
-  border: 1px solid rgba(56, 189, 248, 0.12);
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--color-line);
+  font-size: 0.85rem;
 }
 
 .controls-row dt {
@@ -137,31 +136,25 @@ dd {
 
 .primary-button,
 .secondary-button {
-  border-radius: 999px;
+  border-radius: 0.35rem;
   border: 1px solid transparent;
   padding: 0.8rem 1.2rem;
   font-weight: 700;
   cursor: pointer;
   transition:
     transform 180ms ease,
-    box-shadow 180ms ease,
     border-color 180ms ease,
     background-color 180ms ease;
 }
 
 .primary-button {
-  background: linear-gradient(
-    135deg,
-    var(--color-reef) 0%,
-    var(--color-boost) 100%
-  );
+  background: var(--color-reef);
   color: var(--color-ink);
-  box-shadow: 0 16px 30px rgba(49, 197, 180, 0.28);
 }
 
 .secondary-button {
-  background: rgba(2, 6, 23, 0.28);
-  border-color: rgba(226, 232, 240, 0.2);
+  background: var(--color-panel-strong);
+  border-color: var(--color-line);
   color: var(--color-foam);
 }
 
@@ -172,7 +165,7 @@ dd {
 
 .primary-button:focus-visible,
 .secondary-button:focus-visible {
-  outline: 3px solid rgba(250, 204, 21, 0.45);
+  outline: 3px solid var(--color-gold);
   outline-offset: 3px;
 }
 
@@ -188,9 +181,7 @@ dd {
   gap: 1.25rem;
   align-content: space-between;
   min-height: 15rem;
-  background:
-    linear-gradient(180deg, rgba(11, 79, 108, 0.18), transparent 100%),
-    var(--color-panel);
+  border-top: 3px solid var(--color-reef);
 }
 
 .course-card__body {
@@ -208,23 +199,15 @@ dd {
   width: min(100%, 76rem);
   min-height: 42rem;
   overflow: hidden;
-  border-radius: 2rem;
-  border: 1px solid rgba(49, 197, 180, 0.18);
-  box-shadow: 0 28px 54px rgba(2, 6, 23, 0.3);
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-line);
   background: var(--color-panel-strong);
 }
 
 .game-root {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 32%),
-    radial-gradient(
-      circle at 80% 20%,
-      rgba(49, 197, 180, 0.12),
-      transparent 22%
-    ),
-    linear-gradient(180deg, rgba(11, 79, 108, 0.9) 0%, rgba(2, 6, 23, 1) 100%);
+  background: linear-gradient(180deg, var(--color-ocean), var(--color-ink));
 }
 
 .runtime-overlay {
@@ -234,12 +217,13 @@ dd {
   display: grid;
   align-content: space-between;
   min-height: 42rem;
-  padding: 1.5rem;
+  padding: 1rem;
 }
 
 .runtime-overlay button,
 .runtime-overlay .hud-shell,
 .runtime-overlay .progress-notice,
+.runtime-overlay .service-notice,
 .runtime-overlay .overlay-card {
   pointer-events: auto;
 }
@@ -260,8 +244,10 @@ dd {
 }
 
 .overlay-card {
-  width: min(100%, 28rem);
+  width: min(100%, 32rem);
   color: var(--color-foam);
+  display: grid;
+  gap: 0.75rem;
 }
 
 .overlay-card--centered,
@@ -299,7 +285,7 @@ dd {
 .hud-shell {
   display: grid;
   grid-template-columns: minmax(16rem, 1fr) minmax(24rem, 1.6fr);
-  gap: 0.5rem 1rem;
+  gap: 0.35rem 1rem;
   padding: 0.75rem 1rem;
   align-self: start;
 }
@@ -334,9 +320,9 @@ dd {
 .hud-card,
 .dash-meter {
   padding: 0.5rem 0.75rem;
-  border-radius: 0.75rem;
-  background: rgba(2, 6, 23, 0.42);
-  border: 1px solid rgba(226, 232, 240, 0.12);
+  border-radius: 0.25rem;
+  background: var(--color-panel-strong);
+  border: 1px solid var(--color-line);
 }
 
 .hud-card {
@@ -384,9 +370,305 @@ dd {
 }
 
 .results-time {
-  font-size: 1.4rem;
+  font-family: Georgia, 'Palatino Linotype', serif;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-card .results-time {
+  color: var(--color-foam);
+}
+
+.title-masthead,
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.edition-mark {
+  color: var(--color-copy);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.hero-story {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.wordmark em {
+  color: var(--color-reef);
+  font-weight: 400;
+}
+
+.wordmark-kicker {
+  font-family: Georgia, 'Palatino Linotype', serif;
+  font-style: italic;
+  font-size: 1.15rem;
+}
+
+.hero-meta {
+  margin-left: auto;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.expedition-seal {
+  text-align: center;
   color: var(--color-gold);
-  margin-block: 0.35rem 0.75rem;
+}
+
+.expedition-seal svg {
+  display: block;
+  width: min(100%, 20rem);
+  margin: auto;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.expedition-seal span {
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.seal-fish {
+  fill: #d9ae7230;
+  stroke-width: 2;
+}
+
+.seal-eye {
+  fill: var(--color-gold);
+}
+
+.panel-heading h1,
+.panel-heading h2,
+.overlay-card h2,
+.settings-header h2 {
+  font-family: Georgia, 'Palatino Linotype', serif;
+  font-weight: 400;
+}
+
+.panel-heading h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.info-panel {
+  padding-block: 1.5rem;
+}
+
+.hud-feedback {
+  grid-column: 1 / -1;
+  color: var(--color-reef);
+  font-size: 0.75rem;
+  min-height: 1.15rem;
+}
+
+.hud-card strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.runtime-overlay:has(.results-card) {
+  align-content: center;
+}
+
+.results-card {
+  text-align: center;
+  border-top: 3px solid var(--color-gold);
+}
+
+.results-card .button-row {
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.medal-badge {
+  justify-self: center;
+  border: 1px solid var(--color-line);
+  padding: 0.25rem 1rem;
+  border-radius: 2rem;
+  text-transform: capitalize;
+}
+
+.medal-badge[data-medal='gold'] {
+  color: #f2cc89;
+  border-color: #b9975d;
+}
+
+.medal-badge[data-medal='silver'] {
+  color: #d7e4de;
+  border-color: #93aba4;
+}
+
+.medal-badge[data-medal='bronze'] {
+  color: #eab697;
+  border-color: #b18b73;
+}
+
+.results-achievements {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-line);
+  font-size: 0.85rem;
+}
+
+.results-achievements small {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--color-copy);
+}
+
+.results-achievements .achievement-label {
+  color: var(--color-gold);
+  font-weight: 700;
+}
+
+.text-button {
+  border: 0;
+  background: none;
+  padding: 0.5rem;
+  color: var(--color-copy);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+  cursor: pointer;
+}
+
+.settings-dialog {
+  width: min(36rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  padding: 1.5rem 2rem;
+  color: var(--color-foam);
+  background: var(--color-panel);
+  box-shadow: 0 24px 80px #041c26b3;
+}
+
+.settings-dialog::backdrop {
+  background: #061f24bf;
+}
+
+.settings-header h2 {
+  font-size: 2rem;
+}
+
+.settings-header button {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.settings-description {
+  color: var(--color-copy);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.settings-group {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.settings-group legend {
+  padding-right: 0.75rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-reef);
+}
+
+.toggle-setting,
+.range-setting > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.toggle-setting,
+.range-setting {
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.toggle-setting input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  cursor: pointer;
+}
+
+.toggle-setting small {
+  display: block;
+  max-width: 23rem;
+  color: var(--color-copy);
+  font-size: 0.75rem;
+}
+
+.range-setting input {
+  width: 100%;
+  display: block;
+  margin: 0.5rem 0;
+  cursor: pointer;
+}
+
+.range-setting > span > span {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-gold);
+}
+
+.settings-dialog input:focus-visible,
+.settings-dialog:focus-visible,
+.text-button:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 4px;
+}
+
+.service-notice {
+  padding: 0.75rem 1rem;
+  background: var(--color-panel-strong);
+  color: var(--color-gold);
+  border: 1px solid var(--color-line);
+  border-radius: 0.35rem;
+  font-size: 0.8rem;
+  max-width: 72rem;
+  margin: 0.75rem auto 0;
+}
+
+.service-notice .button-row {
+  margin-top: 0.5rem;
+}
+
+.service-notice button {
+  padding: 0.4rem 0.75rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+[data-reduced-effects='true'] *,
+[data-reduced-effects='true'] *::before,
+[data-reduced-effects='true'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
 }
 
 @keyframes shimmer {
@@ -406,6 +688,19 @@ dd {
 }
 
 @media (max-width: 720px) {
+  .hero-copy {
+    grid-template-columns: 1fr;
+  }
+
+  .expedition-seal,
+  .edition-mark {
+    display: none;
+  }
+
+  .controls-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-shell {
     padding-inline: 1rem;
   }

@@ -30,6 +30,35 @@ const input: InputFrame = {
 };
 const owned: Array<{ dispose(): void }> = [];
 
+it('changes presentation only under reduced motion, preserving exact physics, race, gate and camera tracking', async () => {
+  const subject = await setupObserved();
+  const control = await setupObserved();
+  expect(typeof subject.runtime.setReducedMotion).toBe('function');
+  subject.runtime.setReducedMotion(true);
+  subject.runtime.start();
+  control.runtime.start();
+  const camera = subject.runtime.camera.position.clone();
+  for (let i = 0; i < 120; i++) {
+    subject.runtime.step(input, 1 / 60);
+    control.runtime.step(input, 1 / 60);
+    subject.runtime.present(1, 1 / 60);
+    control.runtime.present(1, 1 / 60);
+  }
+  expect(subject.readState()).toEqual(control.readState());
+  expect(subject.runtime.getDiagnostics()).toEqual(
+    control.runtime.getDiagnostics(),
+  );
+  expect(subject.runtime.camera.position).toEqual(
+    control.runtime.camera.position,
+  );
+  expect(subject.runtime.camera.position).not.toEqual(camera);
+  subject.runtime.pause();
+  const paused = subject.readState();
+  subject.runtime.setReducedMotion(false);
+  subject.runtime.present(1, 0.1);
+  expect(subject.readState()).toEqual(paused);
+});
+
 async function setup(
   definition: unknown = sunlit,
   dependencies?: SceneRuntimeDependencies,

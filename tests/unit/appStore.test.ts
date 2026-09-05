@@ -58,6 +58,38 @@ const illegalTransitionCases: IllegalTransitionCase[] = [
 ];
 
 describe('app screen transitions', () => {
+  it.each(['REPLAY', 'OPEN_COURSE_SELECT'] as const)(
+    'allows %s from results while clearing the run and retaining pending progress',
+    (type) => {
+      const store = createAppStore();
+      advanceToPlaying(store);
+      store.dispatch({
+        type: 'PROGRESS_UPDATED',
+        progress: { version: 1, courses: {} },
+        notice: 'Session-only progress: save pending.',
+      });
+      store.dispatch({
+        type: 'RUN_FINISHED',
+        result: {
+          courseId: 'sunlit-shoals',
+          elapsedMs: 100,
+          medal: 'gold',
+          pearlCount: 1,
+          totalPearls: 1,
+        },
+      });
+      store.dispatch({ type });
+      expect(store.getState()).toMatchObject({
+        screen: type === 'REPLAY' ? 'loading' : 'course-select',
+        selectedCourseId: type === 'REPLAY' ? 'sunlit-shoals' : null,
+        result: null,
+        achievements: null,
+        presentation: null,
+        progressNotice: 'Session-only progress: save pending.',
+      });
+    },
+  );
+
   it('runs title -> select -> loading -> playing -> results', () => {
     const store = createAppStore();
     advanceToPlaying(store);
@@ -132,6 +164,7 @@ describe('app screen transitions', () => {
       selectedCourseId: null,
       presentation: null,
       result: null,
+      achievements: null,
       error: null,
       progress: null,
       progressNotice: null,

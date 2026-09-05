@@ -96,6 +96,7 @@ export interface SceneRuntime {
    */
   step(input: InputFrame, dtSeconds: number): SceneStep;
   present(alpha: number, frameSeconds: number): void;
+  setReducedMotion(reduced: boolean): void;
   dispose(): void;
 }
 
@@ -305,6 +306,10 @@ export async function createSceneRuntime(
       getSnapshot,
       step,
       present,
+      setReducedMotion(reduced) {
+        assertLive();
+        visuals.setReducedMotion(reduced);
+      },
       dispose,
       getDiagnostics() {
         const counts =

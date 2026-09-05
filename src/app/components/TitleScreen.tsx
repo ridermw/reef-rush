@@ -12,29 +12,67 @@ const controls = [
 
 export interface TitleScreenProps {
   onDiveIn: () => void;
+  onSettings: () => void;
 }
 
-export function TitleScreen({ onDiveIn }: TitleScreenProps) {
+export function TitleScreen({ onDiveIn, onSettings }: TitleScreenProps) {
   return (
     <main className="screen screen--title">
       <section className="hero-panel">
-        <p className="eyebrow">Solo time-trial prototype</p>
+        <div className="title-masthead">
+          <p className="eyebrow">A small ocean. A grand expedition.</p>
+          <span className="edition-mark">Field guide / 01</span>
+        </div>
         <div className="hero-copy">
-          <div>
-            <p className="wordmark-kicker">Chart the clean line</p>
-            <h1 className="wordmark">Reef Rush</h1>
+          <div className="hero-story">
+            <p className="wordmark-kicker">Find your flow.</p>
+            <h1 className="wordmark">
+              Reef <em>Rush</em>
+            </h1>
+            <p className="hero-pitch">
+              Slip through sunlit coral, follow the pearl trail, and find the
+              cleanest line home. Every little second is an adventure.
+            </p>
           </div>
-          <p className="hero-pitch">
-            Chase underwater racing lines through generated Sunlit Shoals. Pass
-            every checkpoint, collect pearls, and race for a medal.
-          </p>
+          <div className="expedition-seal" aria-hidden="true">
+            <svg viewBox="0 0 300 240" fill="none">
+              <ellipse cx="150" cy="120" rx="133" ry="96" />
+              <ellipse
+                cx="150"
+                cy="120"
+                rx="116"
+                ry="79"
+                strokeDasharray="2 8"
+              />
+              <path d="M18 160C72 119 94 203 155 169S242 124 286 147M16 178C78 137 98 222 167 185S247 144 287 165" />
+              <path
+                className="seal-fish"
+                d="M91 119C124 69 184 72 214 118C184 160 124 164 91 119ZM92 119L60 91L66 146Z"
+              />
+              <path d="M155 89L137 63L185 86M156 150L141 172L186 147" />
+              <circle cx="192" cy="111" r="4" className="seal-eye" />
+              <path d="M146 104Q157 120 146 134" />
+              <circle cx="231" cy="75" r="5" />
+              <circle cx="242" cy="57" r="3" />
+            </svg>
+            <span>Sunfin / Reef explorer</span>
+          </div>
         </div>
         <div className="hero-actions">
           <button className="primary-button" onClick={onDiveIn} type="button">
             Dive in
           </button>
+          <button
+            className="secondary-button"
+            onClick={onSettings}
+            type="button"
+          >
+            Settings
+          </button>
           <p className="hero-meta">
-            Desktop keyboard and mouse. More courses are in development.
+            Solo time trials
+            <br />
+            Made for keyboard &amp; mouse
           </p>
         </div>
       </section>

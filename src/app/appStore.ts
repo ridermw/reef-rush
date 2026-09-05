@@ -5,6 +5,7 @@ import {
   type FinishedRaceResult,
 } from '../game/race/raceTypes';
 import type { Progress } from '../game/progression/progress';
+import type { FinishAchievements } from '../game/progression/finishAchievements';
 
 export type { CourseId } from '../content/courses/courseIds';
 export type { AppPresentation, AppScreen, AppState } from './screens';
@@ -16,7 +17,12 @@ export type AppAction =
   | { type: 'PRESENTATION_UPDATED'; presentation: AppPresentation }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
-  | { type: 'RUN_FINISHED'; result: FinishedRaceResult }
+  | { type: 'REPLAY' }
+  | {
+      type: 'RUN_FINISHED';
+      result: FinishedRaceResult;
+      achievements?: FinishAchievements;
+    }
   | { type: 'PROGRESS_UPDATED'; progress: Progress; notice: string | null }
   | { type: 'SHOW_ERROR'; title: string; detail: string }
   | { type: 'RETURN_TO_TITLE' };
@@ -33,6 +39,7 @@ function createInitialState(): AppState {
     selectedCourseId: null,
     presentation: null,
     result: null,
+    achievements: null,
     error: null,
     progress: null,
     progressNotice: null,
@@ -62,13 +69,14 @@ function assertScreen(
 function reduceAppState(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'OPEN_COURSE_SELECT':
-      assertScreen(action.type, state.screen, ['title']);
+      assertScreen(action.type, state.screen, ['title', 'results']);
       return {
         ...state,
         screen: 'course-select',
         selectedCourseId: null,
         presentation: null,
         result: null,
+        achievements: null,
         error: null,
       };
 
@@ -80,6 +88,18 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
         selectedCourseId: action.courseId,
         presentation: null,
         result: null,
+        achievements: null,
+        error: null,
+      };
+
+    case 'REPLAY':
+      assertScreen(action.type, state.screen, ['results']);
+      return {
+        ...state,
+        screen: 'loading',
+        presentation: null,
+        result: null,
+        achievements: null,
         error: null,
       };
 
@@ -123,6 +143,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
         ...state,
         screen: 'results',
         result: finishedRaceResultSchema.parse(action.result),
+        achievements: action.achievements ?? null,
       };
 
     case 'PROGRESS_UPDATED':
@@ -138,6 +159,7 @@ function reduceAppState(state: AppState, action: AppAction): AppState {
         screen: 'error',
         presentation: null,
         result: null,
+        achievements: null,
         error: {
           title: action.title,
           detail: action.detail,

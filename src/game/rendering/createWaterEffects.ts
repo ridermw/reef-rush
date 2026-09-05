@@ -71,5 +71,11 @@ export function createWaterEffects(
     }
   }
   present(0);
-  return { present };
+  return {
+    present,
+    setReducedMotion(reduced: boolean) {
+      ambient.visible = !reduced;
+      current.visible = !reduced;
+    },
+  };
 }
