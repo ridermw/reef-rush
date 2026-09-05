@@ -4,6 +4,7 @@ export function courseFixture() {
     courseId: 'sunlit-shoals',
     name: 'Sunlit Shoals',
     summary: 'Generated course fixture.',
+    medalTimesMs: { gold: 12_000, silver: 18_000, bronze: 30_000 },
     visuals: {
       kind: 'generated',
       waterColor: '#137e91',

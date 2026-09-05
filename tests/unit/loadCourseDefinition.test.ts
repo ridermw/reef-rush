@@ -9,6 +9,11 @@ describe('explicit lazy course loading', () => {
     expect(course.courseId).toBe('sunlit-shoals');
     expect(course.name).toBe(COURSE_NAMES['sunlit-shoals']);
     expect(course.visuals.kind).toBe('generated');
+    expect(course.medalTimesMs).toEqual({
+      gold: 12_000,
+      silver: 18_000,
+      bronze: 30_000,
+    });
     expect(course.checkpoints.length).toBeGreaterThanOrEqual(3);
     expect(course.pearls?.length).toBeGreaterThan(0);
     expect(course.objects.map((object) => object.type)).toEqual(

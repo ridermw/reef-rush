@@ -10,6 +10,7 @@ const sunlitShoals = {
   courseId: summary.id,
   name: summary.name,
   summary: summary.summary,
+  medalTimesMs: { gold: 12_000, silver: 18_000, bronze: 30_000 },
   visuals: {
     kind: 'generated',
     waterColor: '#208eaa',

@@ -36,6 +36,11 @@ describe('version 1 course definitions', () => {
     ['unknown course ID', { ...valid, courseId: 'other' }],
     ['empty name', { ...valid, name: ' ' }],
     ['unknown field', { ...valid, typo: true }],
+    ['missing medal times', { ...valid, medalTimesMs: undefined }],
+    [
+      'unordered medal times',
+      { ...valid, medalTimesMs: { gold: 100, silver: 100, bronze: 200 } },
+    ],
     ['nonfinite spawn', { ...valid, spawn: { position: [0, NaN, 0], yaw: 0 } }],
     ['short tuple', { ...valid, spawn: { position: [0, 0], yaw: 0 } }],
     [

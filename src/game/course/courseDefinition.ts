@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { COURSE_IDS } from '../../content/courses/courseIds';
+import { medalTimesMsSchema } from '../race/medals';
 
 const finite = z.number().finite();
+export const MAX_COURSE_PEARLS = 4_096;
 const coordinate = finite.min(-10_000).max(10_000);
 const dimension = finite.min(0.01).max(1_000);
 const angle = finite.min(-Math.PI).max(Math.PI);
@@ -97,6 +99,7 @@ export const courseDefinitionSchema = z
     courseId: z.enum(COURSE_IDS),
     name: text.max(80),
     summary: text.max(300),
+    medalTimesMs: medalTimesMsSchema,
     visuals: z
       .strictObject({
         kind: z.literal('generated'),
@@ -107,7 +110,7 @@ export const courseDefinitionSchema = z
     spawn: z.strictObject({ position: positionSchema, yaw: angle }).readonly(),
     // Array order is traversal order, with the last checkpoint as the finish.
     checkpoints: z.array(checkpointSchema).min(1).max(256).readonly(),
-    pearls: z.array(pearlSchema).max(4_096).readonly().optional(),
+    pearls: z.array(pearlSchema).max(MAX_COURSE_PEARLS).readonly().optional(),
     objects: z.array(courseObjectSchema).max(4_096).readonly(),
   })
   .superRefine((course, context) => {
