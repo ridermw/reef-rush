@@ -68,8 +68,8 @@ function subtract([ax, ay, az]: Vec3, [bx, by, bz]: Vec3): Vec3 {
   return [ax - bx, ay - by, az - bz];
 }
 
-function scale([x, y, z]: Vec3, factor: number): Vec3 {
-  return [x * factor, y * factor, z * factor];
+function divide([x, y, z]: Vec3, divisor: number): Vec3 {
+  return [x / divisor, y / divisor, z / divisor];
 }
 
 function computeWorldVelocity(
@@ -80,7 +80,8 @@ function computeWorldVelocity(
 ): Vec3 {
   const stepSeconds = Number.isFinite(dt) ? Math.max(0, dt) : 0;
   if (stepSeconds > 0) {
-    return scale(desiredDelta, 1 / stepSeconds);
+    // A reciprocal can overflow even when each velocity component is finite.
+    return divide(desiredDelta, stepSeconds);
   }
 
   return nextState.isSubmerged

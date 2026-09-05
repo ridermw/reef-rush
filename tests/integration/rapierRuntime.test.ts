@@ -1,5 +1,5 @@
 import * as RAPIER from '@dimforge/rapier3d-compat';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createPhysicsRuntime } from '../../src/game/physics/createPhysicsRuntime';
 
 it('shares one initialized WASM binding for live geometry reads', async () => {
@@ -14,3 +14,32 @@ it('shares one initialized WASM binding for live geometry reads', async () => {
     runtime.dispose();
   }
 });
+
+it.each(['world', 'eventQueue'] as const)(
+  'retries failed %s release without leaking or double-freeing the other resource',
+  async (resource) => {
+    const runtime = await createPhysicsRuntime();
+    const worldFree = vi.spyOn(runtime.world, 'free');
+    const queueFree = vi.spyOn(runtime.eventQueue, 'free');
+    const failure = new Error('Injected free failure');
+    const failing = resource === 'world' ? worldFree : queueFree;
+    failing.mockImplementationOnce(() => {
+      throw failure;
+    });
+    try {
+      expect(() => runtime.dispose()).toThrow();
+      expect(worldFree).toHaveBeenCalledTimes(1);
+      expect(queueFree).toHaveBeenCalledTimes(1);
+      runtime.dispose();
+      runtime.dispose();
+      expect(failing).toHaveBeenCalledTimes(2);
+      expect(
+        resource === 'world' ? queueFree : worldFree,
+      ).toHaveBeenCalledTimes(1);
+    } finally {
+      worldFree.mockRestore();
+      queueFree.mockRestore();
+      runtime.dispose();
+    }
+  },
+);

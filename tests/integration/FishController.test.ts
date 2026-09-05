@@ -61,6 +61,19 @@ afterEach(() => {
   for (const runtime of runtimes.splice(0)) runtime.dispose();
 });
 
+it.each([Number.MIN_VALUE, 1e-310])(
+  'preserves finite velocity without reciprocal overflow at dt=%s',
+  async (dt) => {
+    const { controller } = await setup({ velocity: [2, 0, 0] });
+    const tinyStep = controller.step(idleInput, stillWater, dt);
+    expect(tinyStep.state.velocity).toEqual([2, 0, 0]);
+
+    const normalStep = controller.step(idleInput, stillWater, 1 / 60);
+    expect(normalStep.state.velocity).toEqual([2, 0, 0]);
+    expect(normalStep.state.position[0]).toBeCloseTo(2 / 60, 6);
+  },
+);
+
 it('detects a trigger moved into the fish before a world step', async () => {
   const { runtime, controller } = await setup();
   const trigger = runtime.world.createCollider(

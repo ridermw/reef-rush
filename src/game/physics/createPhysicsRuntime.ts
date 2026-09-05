@@ -1,4 +1,5 @@
 import * as RAPIER from '@dimforge/rapier3d-compat';
+import { releaseResources } from '../core/resourceCleanup';
 
 let initialization: Promise<void> | undefined;
 
@@ -13,19 +14,16 @@ export async function createPhysicsRuntime(): Promise<PhysicsRuntime> {
 
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const eventQueue = new RAPIER.EventQueue(true);
-  let disposed = false;
+  const releases = [() => world.free(), () => eventQueue.free()];
 
   return {
     world,
     eventQueue,
     dispose(): void {
-      if (disposed) {
-        return;
+      const errors = releaseResources(releases);
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'Physics resource cleanup failed.');
       }
-
-      disposed = true;
-      eventQueue.free();
-      world.free();
     },
   };
 }

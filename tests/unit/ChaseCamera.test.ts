@@ -38,6 +38,20 @@ function getDirection(camera: PerspectiveCamera): Vector3 {
 }
 
 describe('ChaseCamera', () => {
+  it('faces the fish and forward route with the camera negative-Z viewing axis', () => {
+    const { camera } = createCameraInScene();
+    const chaseCamera = new ChaseCamera(camera, tuning);
+    const target = new Vector3(4, -3, 12);
+    chaseCamera.snap(target.toArray(), [0, 0, 1]);
+
+    expect(
+      getDirection(camera).dot(target.clone().sub(camera.position).normalize()),
+    ).toBeGreaterThan(0.999);
+    expect(target.clone().project(camera).z).toBeGreaterThan(-1);
+    expect(target.clone().project(camera).z).toBeLessThan(1);
+    expect(getDirection(camera).z).toBeGreaterThan(0);
+  });
+
   it('snaps immediately, then smoothly follows a moving target', () => {
     const { camera } = createCameraInScene();
     const chaseCamera = new ChaseCamera(camera, tuning);

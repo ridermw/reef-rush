@@ -54,7 +54,7 @@ export class ChaseCamera {
   private readonly orbitPosition = new Vector3();
   private readonly lookTarget = new Vector3();
   private readonly desiredQuaternion = new Quaternion();
-  private readonly orientationTarget = new Object3D();
+  private readonly orientationTarget = new PerspectiveCamera();
   private readonly forward = new Vector3();
   private readonly velocity = new Vector3();
   private readonly desiredPosition = new Vector3();
