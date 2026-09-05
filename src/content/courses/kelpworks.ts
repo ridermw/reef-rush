@@ -1,0 +1,157 @@
+import type { CourseDefinition } from '../../game/course/courseDefinition';
+import { COURSES } from './courseIds';
+
+const summary = COURSES.find((course) => course.id === 'kelpworks');
+if (!summary) throw new Error('Missing Kelpworks course metadata.');
+
+const kelpworks = {
+  version: 1,
+  courseId: summary.id,
+  name: summary.name,
+  summary: summary.summary,
+  medalTimesMs: { gold: 24_000, silver: 36_000, bronze: 55_000 },
+  visuals: {
+    kind: 'generated',
+    waterColor: '#17665b',
+    seabedColor: '#586d45',
+  },
+  spawn: { position: [0, -4, 0], yaw: 0 },
+  checkpoints: [
+    {
+      id: 'kelp-entry',
+      position: [0, -4, 14],
+      radius: 3.5,
+      direction: [0, 0, 1],
+    },
+    {
+      id: 'kelp-west-bend',
+      position: [-6, -4.5, 40],
+      radius: 3.5,
+      direction: [0, 0, 1],
+    },
+    {
+      id: 'kelp-deep-crossing',
+      position: [6, -6, 72],
+      radius: 3.5,
+      direction: [0, 0, 1],
+    },
+    {
+      id: 'kelp-rise',
+      position: [-5, -3.5, 108],
+      radius: 3.5,
+      direction: [0, 0, 1],
+    },
+    {
+      id: 'kelp-finish',
+      position: [0, -4, 144],
+      radius: 3.5,
+      direction: [0, 0, 1],
+    },
+  ],
+  pearls: [
+    { id: 'kelp-pearl-entry', position: [0, -4, 22], radius: 0.4 },
+    { id: 'kelp-pearl-west', position: [-6, -4.5, 48], radius: 0.4 },
+    { id: 'kelp-pearl-deep', position: [6, -6, 80], radius: 0.4 },
+    { id: 'kelp-pearl-rise', position: [-5, -3.5, 116], radius: 0.4 },
+    { id: 'kelp-pearl-home', position: [0, -4, 136], radius: 0.4 },
+  ],
+  objects: [
+    {
+      type: 'box',
+      id: 'kelp-seabed',
+      position: [0, -11, 74],
+      halfExtents: [25, 2, 86],
+      rotation: [0, 0, 0, 1],
+      collision: 'environment',
+      color: '#586d45',
+    },
+    {
+      type: 'box',
+      id: 'kelp-west-bank',
+      position: [-15, -6.5, 48],
+      halfExtents: [3, 2.5, 24],
+      rotation: [0, 0, 0, 1],
+      collision: 'environment',
+      color: '#4d6240',
+    },
+    {
+      type: 'box',
+      id: 'kelp-east-bank',
+      position: [15, -6.5, 100],
+      halfExtents: [3, 2.5, 24],
+      rotation: [0, 0, 0, 1],
+      collision: 'environment',
+      color: '#4d6240',
+    },
+    {
+      type: 'sphere',
+      id: 'kelp-west-roots',
+      position: [-14, -7, 30],
+      radius: 2.5,
+      collision: 'environment',
+      color: '#73834f',
+    },
+    {
+      type: 'sphere',
+      id: 'kelp-east-roots',
+      position: [14, -7, 120],
+      radius: 2.5,
+      collision: 'environment',
+      color: '#73834f',
+    },
+    {
+      type: 'sphere',
+      id: 'kelp-urchin',
+      position: [2, -7, 91],
+      radius: 1,
+      collision: 'hazard',
+      color: '#74516b',
+    },
+    {
+      type: 'sphere',
+      id: 'kelp-channel-rock',
+      position: [12, -7, 80],
+      radius: 2,
+      collision: 'environment',
+      color: '#68766a',
+    },
+    {
+      type: 'current',
+      id: 'kelp-east-flow',
+      position: [0, -4.5, 55],
+      halfExtents: [6, 3, 9],
+      velocity: [1.2, 0, 0],
+      color: '#80b99b',
+    },
+    {
+      type: 'current',
+      id: 'kelp-west-flow',
+      position: [0, -4.5, 96],
+      halfExtents: [6, 3, 9],
+      velocity: [-1.2, 0, 0],
+      color: '#80b99b',
+    },
+    {
+      type: 'rotating-gate',
+      id: 'kelp-crossing-gate',
+      position: [3, -4.5, 59],
+      halfExtents: [3.5, 0.2, 0.2],
+      axis: [0, 0, 1],
+      phase: 0.7,
+      angularSpeed: 0.5,
+      color: '#b0a25b',
+    },
+    {
+      type: 'rotating-gate',
+      id: 'kelp-rise-gate',
+      position: [-8, -3.5, 105],
+      halfExtents: [3, 0.2, 0.2],
+      axis: [0, 0, 1],
+      phase: 1.3,
+      angularSpeed: -0.35,
+      color: '#b0a25b',
+    },
+  ],
+} satisfies CourseDefinition;
+
+export default kelpworks;

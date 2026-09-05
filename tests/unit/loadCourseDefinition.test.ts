@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { COURSE_NAMES } from '../../src/content/courses/courseIds';
+import { COURSE_NAMES, COURSES } from '../../src/content/courses/courseIds';
 import { loadCourseDefinition } from '../../src/game/course/loadCourseDefinition';
 import { courseFixture } from '../fixtures/courseDefinition';
 
@@ -25,7 +25,23 @@ describe('explicit lazy course loading', () => {
     );
   });
 
-  it.each(['kelpworks', 'blacksmoker-run'])(
+  it('loads generated Kelpworks without enabling course selection', async () => {
+    await expect(loadCourseDefinition('kelpworks')).resolves.toMatchObject({
+      courseId: 'kelpworks',
+      name: COURSE_NAMES.kelpworks,
+      visuals: {
+        kind: 'generated',
+        waterColor: '#17665b',
+        seabedColor: '#586d45',
+      },
+      medalTimesMs: { gold: 24_000, silver: 36_000, bronze: 55_000 },
+    });
+    expect(COURSES.find((course) => course.id === 'kelpworks')?.available).toBe(
+      false,
+    );
+  });
+
+  it.each(['blacksmoker-run'])(
     'rejects unbuilt %s without a fallback',
     async (id) => {
       await expect(loadCourseDefinition(id)).rejects.toThrow(
