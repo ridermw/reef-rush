@@ -2,11 +2,6 @@ name: Windows dependency baseline
 
 on:
   workflow_dispatch:
-    inputs:
-      prepare_three_types:
-        description: Prepare matching public Three.js types and npm metadata
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -24,21 +19,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
-      - name: Prepare matching Three.js type metadata
-        if: ${{ inputs.prepare_three_types }}
-        env:
-          NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
-        run: npm install --package-lock-only --ignore-scripts --save-dev --save-exact "@types/three@~0.185.0" --no-audit --no-fund
-      - name: Export npm generated type metadata
-        if: ${{ inputs.prepare_three_types }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: npm-metadata-three-types
-          path: |
-            package.json
-            package-lock.json
-          if-no-files-found: error
-          retention-days: 2
       - name: Restore public locked dependencies
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
