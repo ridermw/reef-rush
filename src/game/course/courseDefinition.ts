@@ -12,6 +12,29 @@ const id = z
   .max(80)
   .regex(/^[a-z][a-z0-9-]*$/);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const assetPath = z
+  .string()
+  .max(240)
+  .regex(
+    /^(?!assets\/)(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.glb$/,
+  );
+const visualColors = { waterColor: color, seabedColor: color };
+const visualsSchema = z
+  .discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('generated'), ...visualColors }),
+    z
+      .strictObject({
+        kind: z.literal('gltf'),
+        ...visualColors,
+        visualAsset: assetPath,
+        collisionAsset: assetPath,
+      })
+      .refine((value) => value.visualAsset !== value.collisionAsset, {
+        message: 'Visual and collision assets must be distinct.',
+        path: ['collisionAsset'],
+      }),
+  ])
+  .readonly();
 const text = z
   .string()
   .min(1)
@@ -100,13 +123,7 @@ export const courseDefinitionSchema = z
     name: text.max(80),
     summary: text.max(300),
     medalTimesMs: medalTimesMsSchema,
-    visuals: z
-      .strictObject({
-        kind: z.literal('generated'),
-        waterColor: color,
-        seabedColor: color,
-      })
-      .readonly(),
+    visuals: visualsSchema,
     spawn: z.strictObject({ position: positionSchema, yaw: angle }).readonly(),
     // Array order is traversal order, with the last checkpoint as the finish.
     checkpoints: z.array(checkpointSchema).min(1).max(256).readonly(),

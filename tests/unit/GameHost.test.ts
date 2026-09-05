@@ -22,6 +22,7 @@ import {
   unlockedCourseIds,
 } from '../../src/game/progression/progress';
 import { courseFixture } from '../fixtures/courseDefinition';
+import { generatedSunlit } from '../fixtures/sunlitTraversal';
 
 const hosts: Array<Pick<GameHost, 'dispose' | 'retryCleanup'>> = [];
 const scenes: SceneRuntime[] = [];
@@ -1247,7 +1248,11 @@ describe('terminal progress and diagnostics', () => {
     ];
     let waypoint = 0;
     const h: Awaited<ReturnType<typeof setup>> = await setup({
-      loadCourse: loadCourseDefinition,
+      loadCourse: async (id) =>
+        parseCourseDefinition({
+          ...(await loadCourseDefinition(id)),
+          visuals: generatedSunlit.visuals,
+        }),
       createInput: () => ({
         clear: () => {},
         destroy: () => {},

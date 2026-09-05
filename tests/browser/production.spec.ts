@@ -9,6 +9,7 @@ test('normal production has no diagnostics and lazy real gameplay works under th
   const errors: string[] = [];
   const failures: string[] = [];
   const scripts = new Set<string>();
+  const assets = new Set<string>();
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('requestfailed', (request) => failures.push(request.url()));
   page.on('response', (response) => {
@@ -16,6 +17,8 @@ test('normal production has no diagnostics and lazy real gameplay works under th
       failures.push(`${response.status()} ${response.url()}`);
     if (response.request().resourceType() === 'script')
       scripts.add(response.url());
+    if (new URL(response.url()).pathname.endsWith('.glb'))
+      assets.add(new URL(response.url()).pathname);
   });
   const noHook = () => page.evaluate(() => !('__REEF_RUSH_TEST__' in window));
   await page.goto('./');
@@ -28,11 +31,17 @@ test('normal production has no diagnostics and lazy real gameplay works under th
       ),
     );
   expect(heavy()).toEqual([]);
+  expect([...assets]).toEqual([]);
   await selectSunlit(page);
   const canvas = page.locator('#game-root canvas');
   await expect(canvas).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause run' })).toBeVisible();
   expect(await noHook()).toBe(true);
+  expect([...assets].sort()).toEqual([
+    '/reef-rush/assets/courses/sunlit-shoals.collision.glb',
+    '/reef-rush/assets/courses/sunlit-shoals.visual.glb',
+    '/reef-rush/assets/fish/sunfin.glb',
+  ]);
   const loaded = heavy();
   for (const name of [
     'three',

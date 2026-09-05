@@ -1,7 +1,10 @@
 import * as RAPIER from '@dimforge/rapier3d-compat';
 import { BufferGeometry, Material, Mesh, Quaternion, Vector3 } from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import sunlit from '../../src/content/courses/sunlitShoals';
+import {
+  generatedSunlit as sunlit,
+  traverseSunlit,
+} from '../fixtures/sunlitTraversal';
 import {
   createSceneRuntime,
   MAX_SCENE_STEP_SECONDS,
@@ -31,7 +34,10 @@ async function setup(
   definition: unknown = sunlit,
   dependencies?: SceneRuntimeDependencies,
 ) {
-  const pending = createSceneRuntime(definition, dependencies);
+  const pending = createSceneRuntime(definition, {
+    createVisuals: createGeneratedSceneVisuals,
+    ...dependencies,
+  });
   await expect(pending).resolves.toBeDefined();
   const runtime = await pending;
   owned.push(runtime);
@@ -656,60 +662,8 @@ describe('headless owned scene runtime', () => {
 
   it('finishes all four authored checkpoints and pickups using only steer/throttle with real Rapier', async () => {
     const runtime = await setup();
-    runtime.start();
-    const points = [
-      [0, -4, 12],
-      [0, -4, 18],
-      [5, -4, 36],
-      [5, -4, 40],
-      [-4, -5, 60],
-      [-4, -5, 64],
-      [0, -4, 84],
-      [0, -4, 93],
-    ];
-    const checkpointIds: string[] = [];
-    const pearlIds: string[] = [];
-    let waypoint = 0;
-    let steps = 0;
-    let steeringSteps = 0;
-    for (
-      ;
-      steps < 3600 && runtime.getSnapshot().race.status !== 'finished';
-      steps++
-    ) {
-      const fish = runtime.getSnapshot().fish;
-      const target = points[waypoint];
-      const dx = target[0] - fish.position[0];
-      const dy = target[1] - fish.position[1];
-      const dz = target[2] - fish.position[2];
-      const yawError = Math.atan2(
-        Math.sin(Math.atan2(dx, dz) - fish.yaw),
-        Math.cos(Math.atan2(dx, dz) - fish.yaw),
-      );
-      const steerX = Math.max(-1, Math.min(1, yawError * 3));
-      if (Math.abs(steerX) > 0.01) steeringSteps++;
-      const result = runtime.step(
-        {
-          ...input,
-          throttle: -0.3,
-          steerX,
-          steerY: Math.max(
-            -1,
-            Math.min(1, Math.atan2(dy, Math.hypot(dx, dz)) / (Math.PI / 3)),
-          ),
-        },
-        1 / 60,
-      );
-      for (const event of result.raceEvents) {
-        if (event.type === 'checkpoint') checkpointIds.push(event.checkpointId);
-        if (event.type === 'pearl') pearlIds.push(event.pearlId);
-      }
-      if (
-        waypoint < points.length - 1 &&
-        result.snapshot.fish.position[2] >= target[2]
-      )
-        waypoint++;
-    }
+    const { steps, steeringSteps, checkpointIds, pearlIds } =
+      traverseSunlit(runtime);
     expect(
       runtime.getSnapshot().race.status,
       JSON.stringify(runtime.getSnapshot()),

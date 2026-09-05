@@ -4,7 +4,7 @@ import { COURSES } from './courseIds';
 const summary = COURSES.find((course) => course.id === 'sunlit-shoals');
 if (!summary) throw new Error('Missing Sunlit Shoals course metadata.');
 
-// Original generated blockout; not a calibrated gameplay or art-quality claim.
+// Original authored presentation over the unchanged primitive course.
 const sunlitShoals = {
   version: 1,
   courseId: summary.id,
@@ -12,7 +12,9 @@ const sunlitShoals = {
   summary: summary.summary,
   medalTimesMs: { gold: 12_000, silver: 18_000, bronze: 30_000 },
   visuals: {
-    kind: 'generated',
+    kind: 'gltf',
+    visualAsset: 'courses/sunlit-shoals.visual.glb',
+    collisionAsset: 'courses/sunlit-shoals.collision.glb',
     waterColor: '#208eaa',
     seabedColor: '#e4d2a2',
   },

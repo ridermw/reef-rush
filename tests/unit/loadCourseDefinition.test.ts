@@ -4,11 +4,15 @@ import { loadCourseDefinition } from '../../src/game/course/loadCourseDefinition
 import { courseFixture } from '../fixtures/courseDefinition';
 
 describe('explicit lazy course loading', () => {
-  it('loads the original generated Sunlit definition', async () => {
+  it('loads the original gltf Sunlit definition', async () => {
     const course = await loadCourseDefinition('sunlit-shoals');
     expect(course.courseId).toBe('sunlit-shoals');
     expect(course.name).toBe(COURSE_NAMES['sunlit-shoals']);
-    expect(course.visuals.kind).toBe('generated');
+    expect(course.visuals).toMatchObject({
+      kind: 'gltf',
+      visualAsset: 'courses/sunlit-shoals.visual.glb',
+      collisionAsset: 'courses/sunlit-shoals.collision.glb',
+    });
     expect(course.medalTimesMs).toEqual({
       gold: 12_000,
       silver: 18_000,

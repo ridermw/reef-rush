@@ -6,8 +6,57 @@ import {
 import { courseFixture } from '../fixtures/courseDefinition';
 
 const valid = courseFixture();
+const gltf = {
+  kind: 'gltf',
+  visualAsset: 'courses/sunlit-shoals.visual.glb',
+  collisionAsset: 'courses/sunlit-shoals.collision.glb',
+  waterColor: '#208eaa',
+  seabedColor: '#e4d2a2',
+};
 
 describe('version 1 course definitions', () => {
+  it('accepts a strict immutable gltf variant with distinct cache-relative paths', () => {
+    const parsed = parseCourseDefinition({ ...valid, visuals: gltf });
+    expect(parsed.visuals).toEqual(gltf);
+    expect(Object.isFrozen(parsed.visuals)).toBe(true);
+  });
+
+  it.each([
+    '',
+    '/courses/reef.glb',
+    'assets/courses/reef.glb',
+    '../reef.glb',
+    'courses/../reef.glb',
+    'https://example.test/reef.glb',
+    'courses\\reef.glb',
+    'courses/%2e%2e/reef.glb',
+    'courses/reef.glb?x=1',
+    'courses/reef.glb#scene',
+    'courses//reef.glb',
+    'courses/reef.gltf',
+    'courses/reef.GLB',
+  ])('rejects invalid gltf asset path %s in either field', (path) => {
+    for (const field of ['visualAsset', 'collisionAsset']) {
+      expect(() =>
+        parseCourseDefinition({
+          ...valid,
+          visuals: { ...gltf, [field]: path },
+        }),
+      ).toThrow();
+    }
+  });
+
+  it.each([
+    { ...gltf, collisionAsset: gltf.visualAsset },
+    { ...gltf, visualAsset: undefined },
+    { ...gltf, collisionAsset: undefined },
+    { ...gltf, waterColor: undefined },
+    { ...gltf, url: 'reef.glb' },
+    { ...gltf, kind: 'generated' },
+  ])('rejects incomplete, equal or mixed visual variants', (visuals) => {
+    expect(() => parseCourseDefinition({ ...valid, visuals })).toThrow();
+  });
+
   it('parses the declarative geometry, route and generated visuals', () => {
     expect(parseCourseDefinition(valid)).toEqual(valid);
     expect(

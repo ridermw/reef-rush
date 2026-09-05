@@ -1,6 +1,7 @@
 import { ColliderDesc } from '@dimforge/rapier3d-compat';
 import { Euler, PerspectiveCamera, Quaternion, Scene, Vector3 } from 'three';
 import { ChaseCamera } from '../camera/ChaseCamera';
+import { createAssetCache, type AssetCache } from '../assets/AssetCache';
 import {
   parseCourseDefinition,
   type CourseDefinition,
@@ -23,10 +24,9 @@ import {
 import type { FishState } from '../player/fishTypes';
 import { RaceSession } from '../race/RaceSession';
 import type { RaceEvent, RaceState } from '../race/raceTypes';
-import {
-  createGeneratedSceneVisuals,
-  type GeneratedSceneVisuals,
-} from '../rendering/createGeneratedSceneVisuals';
+import { createGeneratedSceneVisuals } from '../rendering/createGeneratedSceneVisuals';
+import { createOriginalSceneVisuals } from '../rendering/createOriginalSceneVisuals';
+import type { SceneVisuals } from '../rendering/SceneVisuals';
 import { ConstructionCleanupError, releaseResources } from './resourceCleanup';
 import {
   PLAYER_RADIUS,
@@ -67,8 +67,12 @@ export interface SceneRuntimeDependencies {
   readonly createVisuals?: (
     scene: Scene,
     course: CourseRuntime,
-  ) => GeneratedSceneVisuals;
+  ) => SceneVisuals | Promise<SceneVisuals>;
+  readonly assetCache?: AssetCache;
 }
+
+// This module is only reached from GameHost's lazy scene import.
+let defaultAssetCache: AssetCache | undefined;
 
 export interface SceneRuntime {
   readonly scene: Scene;
@@ -164,10 +168,16 @@ export async function createSceneRuntime(
       },
     });
     const race = new RaceSession(definition, { playerRadius: PLAYER_RADIUS });
-    const visuals = (dependencies.createVisuals ?? createGeneratedSceneVisuals)(
-      scene,
-      course,
-    );
+    const visuals = await (dependencies.createVisuals
+      ? dependencies.createVisuals(scene, course)
+      : definition.visuals.kind === 'generated'
+        ? createGeneratedSceneVisuals(scene, course)
+        : createOriginalSceneVisuals(
+            scene,
+            course,
+            dependencies.assetCache ??
+              (defaultAssetCache ??= createAssetCache()),
+          ));
     visualReleases.push(() => visuals.dispose());
     visualReleases.push(() => camera.removeFromParent());
     scene.add(camera);
@@ -228,6 +238,7 @@ export async function createSceneRuntime(
         orientation,
         race.getState(),
         race.getCollectedPearlIds(),
+        frameSeconds,
       );
       forward.set(0, 0, 1).applyQuaternion(orientation);
       chase.step(

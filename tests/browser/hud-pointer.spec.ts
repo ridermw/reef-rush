@@ -56,10 +56,12 @@ test('desktop HUD leaves the central fish and route view uncovered', async ({
         },
       ),
     ).toBe(true);
+    const screenshot = testInfo.outputPath(
+      `course-clearance-${viewport.width}x${viewport.height}.png`,
+    );
+    await page.screenshot({ path: screenshot });
+    console.info(`Course visibility evidence: ${screenshot}`);
   }
-  const screenshot = testInfo.outputPath('course-clearance.png');
-  await page.screenshot({ path: screenshot });
-  console.info(`Course visibility evidence: ${screenshot}`);
 });
 
 for (const storage of ['empty', 'invalid'] as const) {

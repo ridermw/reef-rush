@@ -11,7 +11,7 @@ import {
   Vector3,
 } from 'three';
 import { afterEach, expect, it, vi } from 'vitest';
-import sunlit from '../../src/content/courses/sunlitShoals';
+import { generatedSunlit as sunlit } from '../fixtures/sunlitTraversal';
 import { ConstructionCleanupError } from '../../src/game/core/resourceCleanup';
 import { createCourseRuntime } from '../../src/game/course/createCourseRuntime';
 import { createPhysicsRuntime } from '../../src/game/physics/createPhysicsRuntime';
