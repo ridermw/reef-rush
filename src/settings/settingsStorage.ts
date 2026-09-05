@@ -5,7 +5,7 @@ import type {
 import {
   DEFAULT_SETTINGS,
   parseSettings,
-  settingsSchema,
+  settingsReadSchema,
   type Settings,
 } from './settings';
 
@@ -66,7 +66,8 @@ export function readSettings(
     'version' in payload &&
     typeof payload.version === 'number' &&
     Number.isSafeInteger(payload.version) &&
-    payload.version !== 1
+    payload.version !== 1 &&
+    payload.version !== 2
   ) {
     return Object.freeze({
       status: 'invalid',
@@ -75,7 +76,7 @@ export function readSettings(
       cause: new Error(`Unsupported settings version: ${payload.version}.`),
     });
   }
-  const parsed = settingsSchema.safeParse(payload);
+  const parsed = settingsReadSchema.safeParse(payload);
   if (!parsed.success) {
     return Object.freeze({
       status: 'invalid',

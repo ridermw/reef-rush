@@ -8,9 +8,9 @@ import {
   settingsSchema,
 } from '../../src/settings/settings';
 
-it('exports validated immutable flat v1 defaults', () => {
+it('exports validated immutable flat v2 defaults with unchanged high quality', () => {
   expect(DEFAULT_SETTINGS).toEqual({
-    version: 1,
+    version: 2,
     masterVolume: 0.4,
     sfxEnabled: true,
     musicEnabled: false,
@@ -18,6 +18,7 @@ it('exports validated immutable flat v1 defaults', () => {
     mouseSensitivity: 1,
     invertMouseY: false,
     reducedMotion: false,
+    renderQuality: 'high',
   });
   expect(settingsSchema.parse(DEFAULT_SETTINGS)).toEqual(DEFAULT_SETTINGS);
   expect(Object.isFrozen(DEFAULT_SETTINGS)).toBe(true);
@@ -33,6 +34,9 @@ it.each([
   { masterVolume: 1 },
   { mouseSensitivity: 0.25 },
   { mouseSensitivity: 2 },
+  { renderQuality: 'low' },
+  { renderQuality: 'medium' },
+  { renderQuality: 'high' },
 ])('accepts inclusive bounds %j', (patch) => {
   expect(parseSettings({ ...DEFAULT_SETTINGS, ...patch })).toMatchObject(patch);
   expect(settingsPatchSchema.parse(patch)).toEqual(patch);
@@ -67,6 +71,11 @@ const invalidValues = [
   { unexpected: true },
   { masterVolume: undefined },
   { mouseSensitivity: undefined },
+  { renderQuality: undefined },
+  { renderQuality: 'auto' },
+  { renderQuality: 'High' },
+  { renderQuality: null },
+  { renderQuality: 1 },
 ];
 
 it.each(invalidValues)(
@@ -77,12 +86,38 @@ it.each(invalidValues)(
   },
 );
 
-it.each([null, [], {}, { version: 1 }, { ...DEFAULT_SETTINGS, version: 2 }])(
+it.each([null, [], {}, { version: 1 }, { ...DEFAULT_SETTINGS, version: 3 }])(
   'rejects incomplete or unsupported settings %#',
   (input) => {
     expect(() => parseSettings(input)).toThrow();
   },
 );
+
+it('normalizes only exact legacy v1 settings, preserving every preference', () => {
+  const legacy = {
+    version: 1,
+    masterVolume: 0.8,
+    sfxEnabled: false,
+    musicEnabled: true,
+    mouseSteering: false,
+    mouseSensitivity: 1.8,
+    invertMouseY: true,
+    reducedMotion: true,
+  };
+  const current = parseSettings(legacy);
+  expect(current).toEqual({ ...legacy, version: 2, renderQuality: 'high' });
+  expect(Object.isFrozen(current)).toBe(true);
+  for (const invalid of [
+    { ...legacy, renderQuality: 'low' },
+    { ...legacy, extra: true },
+    { ...legacy, masterVolume: undefined },
+    { ...legacy, version: 2 },
+    { ...legacy, version: 3 },
+  ]) {
+    expect(() => parseSettings(invalid)).toThrow();
+  }
+  expect(() => settingsSchema.parse(legacy)).toThrow();
+});
 
 it('allows immutable partial patches, but never a version or coerced object', () => {
   expect(settingsPatchSchema.parse({})).toEqual({});

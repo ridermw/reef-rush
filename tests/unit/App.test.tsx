@@ -231,6 +231,21 @@ describe('App shell', () => {
     expect(dialog).toHaveAttribute('tabindex', '-1');
     expect(dialog).toHaveFocus();
     const controls = within(dialog);
+    const quality = controls.getByRole('combobox', { name: 'Render quality' });
+    expect(quality.tagName).toBe('SELECT');
+    expect(quality).toHaveValue('high');
+    expect(quality).toHaveAccessibleDescription(
+      /game resolution.*shell text.*simulation/i,
+    );
+    expect(
+      within(quality)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['High', 'Medium', 'Low']);
+    for (const value of ['medium', 'high', 'low']) {
+      await user.selectOptions(quality, value);
+      expect(settings.getState().settings.renderQuality).toBe(value);
+    }
     const volume = controls.getByRole('slider', { name: 'Master volume' });
     expect(volume).toHaveValue('0.4');
     expect(volume).toHaveAttribute('min', '0');
@@ -260,8 +275,9 @@ describe('App shell', () => {
       mouseSteering: false,
       invertMouseY: true,
       reducedMotion: true,
+      renderQuality: 'low',
     });
-    expect(write).toHaveBeenCalledTimes(7);
+    expect(write).toHaveBeenCalledTimes(10);
     expect(controls.getByRole('alert')).toHaveTextContent(
       /could not save settings.*session/i,
     );
@@ -275,7 +291,7 @@ describe('App shell', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/settings/i);
   });
 
-  it.each(['dialog', 'close', 'range', 'checkbox'])(
+  it.each(['dialog', 'close', 'range', 'checkbox', 'select'])(
     'contains native keys from %s and restores paused ownership without resuming',
     async (target) => {
       const user = userEvent.setup();
@@ -289,7 +305,7 @@ describe('App shell', () => {
         storage: () => ({ getItem: () => null, setItem: () => {} }),
       });
       // No render surface needed: host's window handler is covered by GameHost
-      // tests; this isolates dialog bubbling/containment on all four targets.
+      // tests; this isolates dialog bubbling/containment on native targets.
       const setSettingsOpen = vi.spyOn(host, 'setSettingsOpen');
       store.dispatch({ type: 'OPEN_COURSE_SELECT' });
       store.dispatch({ type: 'LOAD_COURSE', courseId: 'sunlit-shoals' });
@@ -331,7 +347,9 @@ describe('App shell', () => {
               ? close
               : target === 'range'
                 ? controls.getByRole('slider', { name: 'Master volume' })
-                : controls.getByRole('checkbox', { name: 'Mouse steering' });
+                : target === 'select'
+                  ? controls.getByRole('combobox', { name: 'Render quality' })
+                  : controls.getByRole('checkbox', { name: 'Mouse steering' });
         focus.focus();
         const windowKey = vi.fn();
         window.addEventListener('keydown', windowKey);
@@ -405,6 +423,10 @@ describe('App shell', () => {
       expect(unlock).not.toHaveBeenCalled();
       await user.click(
         screen.getByRole('checkbox', { name: 'Mouse steering' }),
+      );
+      await user.selectOptions(
+        screen.getByRole('combobox', { name: 'Render quality' }),
+        'low',
       );
       expect(unlock).not.toHaveBeenCalled();
       context.resumeError = new DOMException('blocked', 'NotAllowedError');

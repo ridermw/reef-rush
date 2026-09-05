@@ -39,7 +39,7 @@ test('native settings persist independently from progress and survive reload', a
   await dialog.getByRole('checkbox', { name: 'Invert mouse pitch' }).check();
   await dialog.getByRole('checkbox', { name: 'Reduced effects' }).check();
   const expected = {
-    version: 1,
+    version: 2,
     masterVolume: 0,
     sfxEnabled: false,
     musicEnabled: true,
@@ -47,6 +47,7 @@ test('native settings persist independently from progress and survive reload', a
     mouseSensitivity: 2,
     invertMouseY: true,
     reducedMotion: true,
+    renderQuality: 'high',
   };
   expect(
     await page.evaluate(

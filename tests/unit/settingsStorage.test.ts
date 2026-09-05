@@ -58,7 +58,9 @@ it('round-trips immutable settings at exactly one key without touching progress'
 it.each([
   ['{bad', 'malformed-json'],
   ['', 'malformed-json'],
-  ['  {"version":2,"future":"keep"}  ', 'unsupported-version'],
+  ['  {"version":3,"future":"keep"}  ', 'unsupported-version'],
+  ['{"version":2}', 'invalid-schema'],
+  ['{"version":1,"renderQuality":"low"}', 'invalid-schema'],
   ['{"version":99}', 'unsupported-version'],
   ['{"version":0}', 'unsupported-version'],
   ['{"version":"1"}', 'invalid-schema'],
@@ -95,7 +97,7 @@ it.each([
 
 it.each([
   {},
-  { ...DEFAULT_SETTINGS, version: 2 },
+  { ...DEFAULT_SETTINGS, version: 3 },
   { ...DEFAULT_SETTINGS, masterVolume: NaN },
   { ...DEFAULT_SETTINGS, mouseSensitivity: Infinity },
   { ...DEFAULT_SETTINGS, extra: true },
@@ -113,6 +115,31 @@ it('reports provider failures with the original cause', () => {
   expect(readSettings(provider)).toEqual({ status: 'unavailable', cause });
   expect(() => saveSettings(DEFAULT_SETTINGS, provider)).toThrow(
     expect.objectContaining({ code: 'unavailable', cause }),
+  );
+});
+
+it('reads exact legacy bytes without writing and saves normalized v2 only explicitly', () => {
+  const legacy = {
+    version: 1,
+    masterVolume: 0.7,
+    sfxEnabled: false,
+    musicEnabled: true,
+    mouseSteering: false,
+    mouseSensitivity: 1.5,
+    invertMouseY: true,
+    reducedMotion: true,
+  };
+  const raw = `  ${JSON.stringify(legacy)}\n`;
+  window.localStorage.setItem(key, raw);
+  const write = vi.spyOn(Storage.prototype, 'setItem');
+  const normalized = { ...legacy, version: 2, renderQuality: 'high' };
+  expect(readSettings()).toEqual({ status: 'loaded', settings: normalized });
+  expect(write).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem(key)).toBe(raw);
+  saveSettings(legacy);
+  expect(write).toHaveBeenCalledExactlyOnceWith(
+    key,
+    JSON.stringify(normalized),
   );
 });
 

@@ -130,6 +130,9 @@ it('publishes once per update after applying and persisting the full session con
 
 it.each([
   { version: 1 },
+  { version: 2 },
+  { renderQuality: undefined },
+  { renderQuality: 'auto' },
   { unknown: true },
   { masterVolume: NaN },
   { masterVolume: 1.1 },
@@ -259,3 +262,65 @@ it('never reads or writes progress through startup or updates', () => {
   );
   expect(values.get('reef-rush.progress')).toBe('preserve these raw bytes');
 });
+
+it.each(['low', 'medium', 'high'] as const)(
+  'explicitly persists v2 %s from legacy without a startup migration write',
+  (renderQuality) => {
+    const legacy = {
+      version: 1,
+      masterVolume: 0.7,
+      sfxEnabled: false,
+      musicEnabled: true,
+      mouseSteering: false,
+      mouseSensitivity: 1.5,
+      invertMouseY: true,
+      reducedMotion: true,
+    };
+    const raw = ` ${JSON.stringify(legacy)} `;
+    window.localStorage.setItem(key, raw);
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    const store = createSettingsStore();
+    expect(store.getState()).toMatchObject({
+      status: 'loaded',
+      settings: { ...legacy, version: 2, renderQuality: 'high' },
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(key)).toBe(raw);
+    store.update({ renderQuality });
+    expect(store.getState()).toMatchObject({
+      status: 'saved',
+      settings: { ...legacy, version: 2, renderQuality },
+    });
+    expect(JSON.parse(window.localStorage.getItem(key) ?? 'null')).toEqual(
+      store.getState().settings,
+    );
+  },
+);
+
+it.each(['quota', 'future'] as const)(
+  'applies render quality session-only while protecting %s settings',
+  (failure) => {
+    const raw =
+      failure === 'future'
+        ? ' {"version":3} '
+        : JSON.stringify(DEFAULT_SETTINGS);
+    window.localStorage.setItem(key, raw);
+    const store = createSettingsStore();
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    if (failure === 'quota')
+      write.mockImplementation(() => {
+        throw new DOMException('Full', 'QuotaExceededError');
+      });
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.update({ renderQuality: 'low' });
+    expect(store.getState()).toMatchObject({
+      status: 'session-only',
+      settings: { version: 2, renderQuality: 'low' },
+    });
+    expect(store.getState().notice).toMatch(/session/i);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem(key)).toBe(raw);
+    if (failure === 'future') expect(write).not.toHaveBeenCalled();
+  },
+);

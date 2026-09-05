@@ -33,7 +33,7 @@ import {
   createSettingsStore,
   type SettingsStore,
 } from '../../settings/SettingsStore';
-import type { Settings } from '../../settings/settings';
+import type { RenderQuality, Settings } from '../../settings/settings';
 import {
   createAudioEngine,
   type AudioEngine,
@@ -41,6 +41,7 @@ import {
 } from '../audio/AudioEngine';
 import { createRunFeedback, type RunFeedback } from './runFeedback';
 import { finishAchievements } from '../progression/finishAchievements';
+import { renderPixelRatio } from '../rendering/renderQuality';
 
 export type HostRenderer = Pick<
   WebGLRenderer,
@@ -190,6 +191,7 @@ export class GameHost {
   private rendered = 0;
   private steps = 0;
   private hasSize = false;
+  private renderQuality: RenderQuality;
   private progress: Progress;
   private notice: string | null = null;
 
@@ -198,6 +200,7 @@ export class GameHost {
     private readonly deps: GameHostDependencies = {},
   ) {
     this.settings = deps.settings ?? createSettingsStore();
+    this.renderQuality = this.settings.getState().settings.renderQuality;
     this.motionQuery =
       typeof window.matchMedia === 'function'
         ? window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -347,6 +350,10 @@ export class GameHost {
     this.audio.setSettings(settings);
     this.applyInputPreferences();
     this.applyPresentationPreferences();
+    if (settings.renderQuality !== this.renderQuality) {
+      this.renderQuality = settings.renderQuality;
+      this.onResize();
+    }
   };
 
   private effectivePreferences(): Settings {
@@ -803,7 +810,7 @@ export class GameHost {
     }
     this.hasSize = width > 0 && height > 0;
     if (!this.hasSize) return;
-    this.renderer.setPixelRatio(Math.min(2, dpr));
+    this.renderer.setPixelRatio(renderPixelRatio(dpr, this.renderQuality));
     this.renderer.setSize(width, height, false);
     this.scene.camera.aspect = width / height;
     this.scene.camera.updateProjectionMatrix();

@@ -752,6 +752,233 @@ describe('focus at asynchronous readiness', () => {
   });
 });
 
+describe('retained render quality sizing', () => {
+  function preferences() {
+    return createSettingsStore(() => ({
+      getItem: () => null,
+      setItem: () => {},
+    }));
+  }
+
+  it.each([
+    ['low', 1],
+    ['medium', 1.5],
+    ['high', 2],
+  ] as const)(
+    'initializes %s without changing CSS dimensions or owners',
+    async (renderQuality, ratio) => {
+      const settings = preferences();
+      settings.update({ renderQuality });
+      const h = await setup({ settings });
+      await h.load();
+      expect(h.renderer.setPixelRatio).toHaveBeenLastCalledWith(ratio);
+      expect(h.renderer.setSize).toHaveBeenLastCalledWith(800, 400, false);
+      expect(h.renderer.domElement.style.width).toBe('100%');
+      expect(h.renderer.domElement.style.height).toBe('100%');
+      expect(h.runtimes[0].camera.aspect).toBe(2);
+      expect(h.createRenderer).toHaveBeenCalledOnce();
+      expect(h.runtimes).toHaveLength(1);
+      expect(h.frames.size).toBe(1);
+    },
+  );
+
+  it('changes only the retained buffer while paused and ignores unrelated or unchanged preferences', async () => {
+    const settings = preferences();
+    const createInput = vi.fn(
+      (canvas: HTMLCanvasElement, isPlaying: () => boolean) =>
+        new InputController(window, { pointerSurface: canvas, isPlaying }),
+    );
+    const h = await setup({ settings, createInput });
+    await h.load();
+    h.frame(50);
+    h.store.dispatch({ type: 'PAUSE' });
+    const before = h.host.getSnapshot();
+    const canvas = h.renderer.domElement;
+    const projection = h.runtimes[0].camera.projectionMatrix.clone();
+    const pending = [...h.frames.values()];
+    const dispatch = vi.spyOn(h.store, 'dispatch');
+    vi.mocked(h.renderer.setPixelRatio).mockClear();
+    vi.mocked(h.renderer.setSize).mockClear();
+    for (const [renderQuality, ratio] of [
+      ['medium', 1.5],
+      ['low', 1],
+      ['high', 2],
+    ] as const) {
+      settings.update({ renderQuality });
+      expect(h.renderer.setPixelRatio).toHaveBeenLastCalledWith(ratio);
+      expect(h.renderer.setSize).toHaveBeenLastCalledWith(800, 400, false);
+    }
+    expect(h.renderer.setSize).toHaveBeenCalledTimes(3);
+    settings.update({ renderQuality: 'high' });
+    settings.update({
+      masterVolume: 0.2,
+      mouseSteering: false,
+      reducedMotion: true,
+    });
+    settings.update({});
+    expect(h.renderer.setSize).toHaveBeenCalledTimes(3);
+    expect(h.renderer.setPixelRatio).toHaveBeenCalledTimes(3);
+    expect([...h.frames.values()]).toEqual(pending);
+    expect(h.runtimes[0].camera.projectionMatrix).toEqual(projection);
+    h.frame(1000);
+    const after = h.host.getSnapshot();
+    expect(after.race).toEqual(before.race);
+    expect(after.player).toEqual(before.player);
+    expect(after.frame.steps).toBe(before.frame.steps);
+    expect(after.resources).toEqual(before.resources);
+    expect(h.container.firstElementChild).toBe(canvas);
+    expect(h.createRenderer).toHaveBeenCalledOnce();
+    expect(createInput).toHaveBeenCalledOnce();
+    expect(dispatch).not.toHaveBeenCalled();
+    await h.host.dispose();
+    settings.update({ renderQuality: 'low' });
+    expect(h.renderer.setSize).toHaveBeenCalledTimes(3);
+    expect(h.host.getSnapshot().resources).toEqual({
+      canvases: 0,
+      rafChains: 0,
+      pendingCleanup: 0,
+      scene: null,
+    });
+  });
+
+  it('uses the latest pending choice on load, zero-size recovery, and display resize', async () => {
+    const gate = deferred<void>();
+    const settings = preferences();
+    const h = await setup({
+      settings,
+      loadCourse: async () => {
+        await gate.promise;
+        return definition();
+      },
+    });
+    h.resize({ width: 0, height: 0, dpr: 2 });
+    const loading = h.load();
+    settings.update({ renderQuality: 'low' });
+    gate.resolve();
+    await loading;
+    h.frame(17);
+    expect(h.renderer.setSize).not.toHaveBeenCalled();
+    settings.update({ renderQuality: 'medium' });
+    expect(h.renderer.setSize).not.toHaveBeenCalled();
+    h.resize({ width: 900, height: 600, dpr: 1.25 });
+    expect(h.renderer.setPixelRatio).toHaveBeenLastCalledWith(0.9375);
+    expect(h.renderer.setSize).toHaveBeenLastCalledWith(900, 600, false);
+    expect(h.runtimes[0].camera.aspect).toBe(1.5);
+    h.frame(17);
+    expect(h.renderer.render).toHaveBeenCalled();
+  });
+
+  it('defers quality sizing during loss, restores the latest on the same paused run and keeps it on retry', async () => {
+    const settings = preferences();
+    const h = await setup({ settings });
+    await h.load();
+    h.frame(50);
+    const canvas = h.renderer.domElement;
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    const lost = h.host.getSnapshot();
+    vi.mocked(h.renderer.setSize).mockClear();
+    vi.mocked(h.renderer.setPixelRatio).mockClear();
+    settings.update({ renderQuality: 'low' });
+    settings.update({ renderQuality: 'medium' });
+    h.resize({ width: 640, height: 480, dpr: 1 });
+    h.frame(1000);
+    expect(h.renderer.setPixelRatio).not.toHaveBeenCalled();
+    expect(h.renderer.setSize).not.toHaveBeenCalled();
+    expect(h.host.getSnapshot().frame).toEqual(lost.frame);
+    canvas.dispatchEvent(new Event('webglcontextrestored'));
+    expect(h.renderer.setPixelRatio).toHaveBeenLastCalledWith(0.75);
+    expect(h.renderer.setSize).toHaveBeenLastCalledWith(640, 480, false);
+    h.frame(17);
+    expect(h.host.getSnapshot()).toMatchObject({
+      screen: 'paused',
+      graphicsLost: false,
+      race: lost.race,
+      player: lost.player,
+      frame: { steps: lost.frame.steps },
+      resources: { ...lost.resources, rafChains: 1 },
+    });
+    expect(h.createRenderer).toHaveBeenCalledOnce();
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    settings.update({ renderQuality: 'low' });
+    const replacement = {
+      ...h.renderer,
+      domElement: document.createElement('canvas'),
+    };
+    h.createRenderer.mockResolvedValue(replacement);
+    h.host.retryCourse();
+    await h.host.whenIdle();
+    expect(h.container.firstElementChild).toBe(replacement.domElement);
+    expect(h.renderer.setPixelRatio).toHaveBeenLastCalledWith(0.5);
+    expect(h.host.getSnapshot().preferences.renderQuality).toBe('low');
+    expect(h.runtimes).toHaveLength(2);
+    expect(h.runtimes[0].getDiagnostics().lifecycle).toBe('disposed');
+    expect(h.frames.size).toBe(1);
+  });
+
+  it.each(
+    (['measure', 'setPixelRatio', 'setSize'] as const).flatMap((phase) =>
+      (['saved', 'session-only'] as const).map((status) => ({ phase, status })),
+    ),
+  )(
+    'contains settings-triggered $phase failure while reporting $status and notifying subscribers',
+    async ({ phase, status }) => {
+      const values = new Map<string, string>();
+      const settings = createSettingsStore(() => ({
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          if (status === 'session-only')
+            throw new DOMException('Full', 'QuotaExceededError');
+          values.set(key, value);
+        },
+      }));
+      const measure = vi.fn(() => ({ width: 800, height: 400, dpr: 2 }));
+      const h = await setup({ settings, measure });
+      await h.load();
+      h.frame(17);
+      const dispatch = vi.spyOn(h.store, 'dispatch');
+      const failure = new Error(`quality ${phase} failed`);
+      if (phase === 'measure')
+        measure.mockImplementation(() => {
+          throw failure;
+        });
+      else
+        vi.mocked(h.renderer[phase]).mockImplementation(() => {
+          throw failure;
+        });
+      const subscriber = vi.fn();
+      settings.subscribe(subscriber);
+      expect(() => settings.update({ renderQuality: 'low' })).not.toThrow();
+      expect(dispatch).toHaveBeenCalledWith({
+        type: 'SHOW_ERROR',
+        title: 'Run unavailable',
+        detail: failure.message,
+      });
+      expect(h.store.getState().screen).toBe('error');
+      expect(h.frames.size).toBe(0);
+      expect(h.host.getSnapshot().resources).toEqual({
+        canvases: 0,
+        rafChains: 0,
+        pendingCleanup: 0,
+        scene: null,
+      });
+      expect(subscriber).toHaveBeenCalledOnce();
+      expect(settings.getState()).toMatchObject({
+        status,
+        settings: { version: 2, renderQuality: 'low' },
+      });
+      if (status === 'saved') {
+        expect(settings.getState().notice).toBeNull();
+        expect(JSON.parse(values.get('reef-rush.settings') ?? 'null')).toEqual(
+          settings.getState().settings,
+        );
+      } else {
+        expect(settings.getState().notice).toMatch(/could not save.*session/i);
+        expect(values.size).toBe(0);
+      }
+    },
+  );
+});
+
 describe('owned graphics loss and explicit course retry', () => {
   function graphics(canvas: HTMLCanvasElement, type: 'lost' | 'restored') {
     const event = new Event(`webglcontext${type}`, { cancelable: true });

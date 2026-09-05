@@ -133,6 +133,26 @@ export function SettingsDialog({
         </label>
         <label className="toggle-setting">
           <span>
+            Render quality{' '}
+            <small id="render-quality-description">
+              Changes game resolution, not shell text or simulation.
+            </small>
+          </span>
+          <select
+            aria-label="Render quality"
+            aria-describedby="render-quality-description"
+            value={settings.renderQuality}
+            onChange={(event) =>
+              store.update({ renderQuality: event.currentTarget.value })
+            }
+          >
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label className="toggle-setting">
+          <span>
             Reduced effects{' '}
             <small id="reduced-effects-description">
               Still water, less decorative motion. System preference also
