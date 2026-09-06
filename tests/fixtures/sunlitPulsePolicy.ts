@@ -369,6 +369,37 @@ function segmentDistance(from: Vector3, to: Vector3, point: Vector3) {
   );
 }
 
+function boundedGeometryCoordinate(value: number) {
+  // Leave room for three-dimensional endpoint differences and their norms.
+  return Math.abs(value) <= Number.MAX_VALUE / 8;
+}
+
+function outsidePickupBounds(
+  from: Vector3,
+  to: Vector3,
+  goal: SunlitPulseGoal,
+) {
+  // Keep the authoritative overflow/error path for extreme coordinates.
+  if (
+    !from.every(boundedGeometryCoordinate) ||
+    !to.every(boundedGeometryCoordinate) ||
+    !goal.position.every(boundedGeometryCoordinate) ||
+    !boundedGeometryCoordinate(goal.radius) ||
+    goal.radius < 0
+  )
+    return false;
+  for (let axis = 0; axis < 3; axis++) {
+    // Strict comparisons also retain contacts on rounded box faces. Both
+    // endpoints on one side exclude every point of the exact segment.
+    if (
+      Math.max(from[axis], to[axis]) < goal.position[axis] - goal.radius ||
+      Math.min(from[axis], to[axis]) > goal.position[axis] + goal.radius
+    )
+      return true;
+  }
+  return false;
+}
+
 function potential(
   fish: FishState,
   goals: readonly SunlitPulseGoal[],
@@ -522,7 +553,8 @@ function predictPulse(
   const clearance = goals.map(() => Infinity);
   const irreversibleMiss = goals.map(() => 0);
   let initiallyQualified = 0;
-  for (const [index, goal] of goals.entries()) {
+  for (let index = 0; index < goals.length; index++) {
+    const goal = goals[index];
     if (index && contacts[index - 1] === null) break;
     if (
       (goal.kind === 'recovery' &&
@@ -549,6 +581,7 @@ function predictPulse(
   let steerX = 0;
   let steerY = 0;
   let nextEvent = 0;
+  let activeGoal = initiallyQualified;
   for (let tick = 0; tick < motionSteps; tick++) {
     while (timeline.events[nextEvent]?.at === tick) {
       const event = timeline.events[nextEvent++];
@@ -578,10 +611,14 @@ function predictPulse(
     const completed = tick + 1;
     if (completed === timeline.observeAt) boundaryFish = fish;
     if (completed === evaluationAt) evaluationFish = fish;
-    for (const [index, goal] of goals.entries()) {
-      const eligible = index === 0 ? 0 : contacts[index - 1];
-      if (eligible === null || eligible > completed || contacts[index] !== null)
+    for (let index = activeGoal; index < goals.length; index++) {
+      if (contacts[index] !== null) {
+        activeGoal = index + 1;
         continue;
+      }
+      const eligible = index === 0 ? 0 : contacts[index - 1];
+      if (eligible === null || eligible > completed) break;
+      const goal = goals[index];
       const fraction = Math.max(0, eligible - tick);
       const from = between(previous, fish.position, fraction);
       if (goal.kind === 'recovery') {
@@ -610,9 +647,10 @@ function predictPulse(
       if (!awarded[index]) {
         const segment = movementSegment(from, fish.position);
         let contact: number | null = null;
-        if (goal.kind === 'pearl')
-          contact = pickupFraction(segment, goal.position, goal.radius);
-        else if (crossing) {
+        if (goal.kind === 'pearl') {
+          if (!outsidePickupBounds(from, fish.position, goal))
+            contact = pickupFraction(segment, goal.position, goal.radius);
+        } else if (crossing) {
           const exact = checkpointFraction(segment, goal.definition);
           if (exact) contact = scaleIntersection(exact, 1);
         }

@@ -7,6 +7,7 @@ import {
   stepFishMotion,
   type FishState,
 } from '../../src/game/player/stepFishMotion';
+import * as raceGeometry from '../../src/game/race/raceGeometry';
 import * as control from '../fixtures/sunlitPulsePolicy';
 import {
   advanceSunlitWaypoint,
@@ -24,6 +25,136 @@ function scenarios() {
 }
 
 const timing = { onsetSteps: 12, holdSteps: 8, observationSteps: 6 };
+
+it('does not solve pearl intersections for disjoint movement boxes', () => {
+  const start = {
+    ...observation(),
+    waypoint: 1,
+    checkpointIndex: 1,
+    slowing: true,
+    fish: {
+      ...observation().fish,
+      position: [100, -4, 0],
+      velocity: [0, 0, 0],
+    } satisfies FishState,
+  };
+  const pickup = vi.spyOn(raceGeometry, 'pickupFraction');
+  try {
+    const result = control.predictSunlitPulse(
+      start,
+      { brakeHeld: false, slowing: true, pulse: null },
+      timing,
+    );
+    expect(result.completedGoals).toBe(0);
+    expect(result.contacts.every((at) => at === null)).toBe(true);
+    expect(pickup.mock.calls.length).toBe(0);
+  } finally {
+    pickup.mockRestore();
+  }
+});
+
+it('does not allocate goal iterators on every motion tick', () => {
+  const start = observation();
+  const entries = vi.spyOn(Array.prototype, 'entries');
+  let count: number;
+  try {
+    control.predictSunlitPulse(
+      start,
+      { brakeHeld: false, pulse: null },
+      timing,
+    );
+    count = entries.mock.calls.length;
+  } finally {
+    entries.mockRestore();
+  }
+  expect(count).toBeLessThanOrEqual(3);
+});
+
+const pickupFaces = [0, 1, 2].flatMap((axis) =>
+  [-1, 1].flatMap((side) =>
+    [-1, 0, 1].map((offset) => ({ axis, side, offset })),
+  ),
+);
+
+it.each(pickupFaces)(
+  'retains the exact pearl predicate at face $axis/$side offset $offset',
+  ({ axis, side, offset }) => {
+    const start = {
+      ...observation(),
+      waypoint: 3,
+      checkpointIndex: 2,
+      collectedPearlIds: ['pearl-entry'],
+      slowing: true,
+    };
+    const goal = control.sunlitPulseGoals(start)[0];
+    start.fish.position = [...goal.position];
+    start.fish.velocity = [0, 0, 0];
+    const face = goal.position[axis] + side * goal.radius;
+    start.fish.position[axis] =
+      face + side * offset * Math.max(1, Math.abs(face)) * Number.EPSILON;
+    const contact = raceGeometry.pickupFraction(
+      raceGeometry.movementSegment(start.fish.position, start.fish.position),
+      goal.position,
+      goal.radius,
+    );
+    const command = { brakeHeld: false, slowing: true, pulse: null };
+    const result = control.predictSunlitPulse(start, command, timing);
+    if (contact !== null) {
+      const earned = control.predictSunlitPulse(
+        { ...start, collectedPearlIds: [...start.collectedPearlIds, goal.id] },
+        command,
+        timing,
+      );
+      const firstClearance = Math.max(
+        0,
+        goal.depth - start.fish.position[2],
+        Math.hypot(
+          ...start.fish.position.map(
+            (value, index) => value - goal.position[index],
+          ),
+        ) -
+          (goal.radius - 0.15),
+      );
+      expect(result).toEqual({
+        ...earned,
+        minimumClearance: [firstClearance, ...earned.minimumClearance.slice(1)],
+      });
+    } else {
+      expect(result.contacts.every((at) => at === null)).toBe(true);
+      expect(result.completedGoals).toBe(0);
+      expect(result.boundaryGoalIndex).toBe(0);
+    }
+  },
+);
+
+it.each([
+  { scale: 1, message: 'Race movement geometry overflow.' },
+  { scale: 0.5, message: 'Pulse prediction cost overflow.' },
+])(
+  'retains authoritative overflow errors at coordinate scale $scale',
+  ({ scale, message }) => {
+    const value = Number.MAX_VALUE * scale;
+    const start = {
+      ...observation(),
+      waypoint: 3,
+      checkpointIndex: 2,
+      collectedPearlIds: ['pearl-entry'],
+      slowing: true,
+      fish: {
+        ...observation().fish,
+        position: [value, -value, value],
+        velocity: [0, 0, 0],
+      } satisfies FishState,
+    };
+    expect(() =>
+      control.predictSunlitPulse(
+        start,
+        { brakeHeld: false, slowing: true, pulse: null },
+        timing,
+      ),
+    ).toThrow(new RangeError(message));
+  },
+);
 
 it('does not revalidate a uniform authored current for every forecast step', () => {
   const sample = vi.spyOn(CurrentVolume.prototype, 'sampleCurrent');
