@@ -9,6 +9,7 @@ import { driveSunlit } from '../browser/acceptance-helpers';
 import type { KeyboardObservation } from '../fixtures/courseKeyboardPolicy';
 import { deferred } from '../fixtures/originalAssets';
 import * as nativeRecording from '../fixtures/nativeInputRecording';
+import * as pulseControl from '../fixtures/sunlitPulsePolicy';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -71,6 +72,9 @@ function nativePage(
   evaluate: Page['evaluate'],
   down: Page['keyboard']['down'],
   up: Page['keyboard']['up'],
+  press: Page['keyboard']['press'] = vi
+    .fn<Page['keyboard']['press']>()
+    .mockResolvedValue(),
 ) {
   const page: Pick<Page, 'evaluate' | 'keyboard'> = {
     evaluate,
@@ -78,12 +82,135 @@ function nativePage(
       down,
       up,
       insertText: vi.fn(),
-      press: vi.fn(),
+      press,
       type: vi.fn(),
     },
   };
   return page as Page;
 }
+
+function plan(...commands: pulseControl.SunlitPulseCommand[]) {
+  const policy = vi
+    .spyOn(pulseControl, 'sunlitPulsePolicy')
+    .mockImplementation(() => {
+      throw new Error('Unexpected extra control decision.');
+    });
+  for (const command of commands) {
+    policy.mockReturnValueOnce(
+      Object.freeze({
+        ...command,
+        worstCost: 0,
+        meanCost: 0,
+        worstMiss: 0,
+        stationaryCost: 1,
+        motionSteps: 16800,
+      }),
+    );
+  }
+  return policy;
+}
+
+it('keeps held W separate from completed steering pulses across observations', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  plan(
+    { brakeHeld: false, accelerating: true, pulse: 'a' },
+    { brakeHeld: false, accelerating: true, pulse: 'ArrowUp' },
+  );
+  const stop = new Error('End of pulse sequence');
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
+  const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const press = vi.fn<Page['keyboard']['press']>().mockResolvedValue();
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockResolvedValueOnce({
+      state: snapshot(observations[1]),
+      hud: ['0:26.63', '2 / 4', '2'],
+    })
+    .mockRejectedValue(stop);
+  await expect(driveSunlit(nativePage(evaluate, down, up, press))).rejects.toBe(
+    stop,
+  );
+  expect(down.mock.calls).toEqual([['w']]);
+  expect(press.mock.calls).toEqual([
+    ['a', { delay: 100 }],
+    ['ArrowUp', { delay: 100 }],
+  ]);
+  expect(up.mock.calls).toEqual([['w']]);
+});
+
+it('emits no invented native operation for an unchanged cruise', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const policy = plan({ brakeHeld: false, pulse: null });
+  const stop = new Error('Next observation');
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
+  const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const press = vi.fn<Page['keyboard']['press']>().mockResolvedValue();
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockRejectedValue(stop);
+  await expect(driveSunlit(nativePage(evaluate, down, up, press))).rejects.toBe(
+    stop,
+  );
+  expect(policy).toHaveBeenCalledTimes(1);
+  expect(down).not.toHaveBeenCalled();
+  expect(up).not.toHaveBeenCalled();
+  expect(press).not.toHaveBeenCalled();
+});
+
+it('drains a pending pulse before handling a terminal observation and releasing its base', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  const policy = plan({
+    brakeHeld: false,
+    slowing: true,
+    propel: true,
+    pulse: 'ArrowDown',
+  });
+  const gate = deferred<void>();
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
+  const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  let terminal = false;
+  const press = vi.fn<Page['keyboard']['press']>(() => {
+    terminal = true;
+    return gate.promise;
+  });
+  const ending = snapshot(observations[1]);
+  if (!ending.race) throw new Error('Missing terminal fixture race.');
+  const finished: HostSnapshot = {
+    ...ending,
+    screen: 'results',
+    race: {
+      ...ending.race,
+      status: 'finished',
+      checkpointIndex: 4,
+      pearlCount: 4,
+    },
+  };
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockImplementation(() => {
+      if (!terminal) throw new Error('Terminal fixture was not reached.');
+      return Promise.resolve({ state: finished, hud: [] });
+    });
+  const operation = driveSunlit(nativePage(evaluate, down, up, press)).catch(
+    (error: unknown) => error,
+  );
+  try {
+    await vi.waitFor(() => expect(press).toHaveBeenCalledTimes(1));
+    expect(terminal).toBe(true);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(up).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+  }
+  // This transport fixture intentionally lacks a complete earned milestone log.
+  expect(await operation).toBeInstanceOf(Error);
+  expect(policy).toHaveBeenCalledTimes(1);
+  expect(evaluate).toHaveBeenCalledTimes(2);
+  expect(up.mock.calls).toEqual([['s']]);
+});
 
 it('enrolls explicit timing capture before reading or driving the course', async () => {
   const failure = new Error('Recording enrollment observed.');
@@ -100,8 +227,12 @@ it('enrolls explicit timing capture before reading or driving the course', async
   expect(evaluate).not.toHaveBeenCalled();
 });
 
-it('releases pitch instead of commanding an upward overshoot after the recorded native observation gap', async () => {
+it('passes actual route observations and base ownership to the pulse controller', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  const policy = plan(
+    { brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowDown' },
+    { brakeHeld: false, accelerating: true, pulse: null },
+  );
   const held = new Set<string>();
   const applied: string[][] = [];
   const stop = new Error('End of recorded observations');
@@ -126,41 +257,85 @@ it('releases pitch instead of commanding an upward overshoot after the recorded 
     }
     return Promise.reject(stop);
   });
-  await expect(driveSunlit(nativePage(evaluate, down, up))).rejects.toBe(stop);
+  const press = vi.fn<Page['keyboard']['press']>().mockResolvedValue();
+  await expect(driveSunlit(nativePage(evaluate, down, up, press))).rejects.toBe(
+    stop,
+  );
 
   expect(applied).toHaveLength(2);
-  expect(applied[0]).toContain('ArrowDown');
-  expect(applied[1]).not.toContain('ArrowUp');
-  expect(applied[1]).not.toContain('ArrowDown');
+  expect(applied).toEqual([['s'], ['w']]);
+  expect(press).toHaveBeenCalledExactlyOnceWith('w+ArrowDown', { delay: 100 });
+  expect(policy.mock.calls.map(([value]) => value)).toEqual([
+    {
+      fish: observations[0].fish,
+      steps: 1522,
+      previousSteps: undefined,
+      brakeHeld: false,
+      slowing: false,
+      accelerating: false,
+      waypoint: 4,
+      approachingCheckpoint: false,
+      checkpointIndex: 2,
+      collectedPearlIds: ['pearl-entry', 'pearl-bend'],
+    },
+    {
+      fish: observations[1].fish,
+      steps: 1598,
+      previousSteps: 1522,
+      brakeHeld: false,
+      slowing: true,
+      accelerating: false,
+      waypoint: 4,
+      approachingCheckpoint: false,
+      checkpointIndex: 2,
+      collectedPearlIds: ['pearl-entry', 'pearl-bend'],
+    },
+  ]);
   expect(held.size).toBe(0);
 });
 
-it('batches the initial native key edges without serial round trips', async () => {
+it('acknowledges S before pulsing W and observes only after the pulse completes', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
-  const gate = deferred<void>();
+  plan({ brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowDown' });
+  const base = deferred<void>();
+  const pulse = deferred<void>();
   const stop = new Error('Observed the applied keys');
-  const down = vi.fn<Page['keyboard']['down']>(() => gate.promise);
+  const down = vi.fn<Page['keyboard']['down']>(() => base.promise);
   const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const press = vi.fn<Page['keyboard']['press']>(() => pulse.promise);
   const evaluate = vi
     .fn<Page['evaluate']>()
     .mockResolvedValueOnce(snapshot(observations[0]))
     .mockRejectedValue(stop);
-  const completed = driveSunlit(nativePage(evaluate, down, up)).catch(
+  const completed = driveSunlit(nativePage(evaluate, down, up, press)).catch(
     (error: unknown) => error,
   );
   try {
-    await vi.waitFor(() => expect(down).toHaveBeenCalledTimes(4));
-    expect(down.mock.calls).toEqual([['d'], ['ArrowDown'], ['w'], ['Shift']]);
+    await vi.waitFor(() => expect(down).toHaveBeenCalledTimes(1));
+    expect(down.mock.calls).toEqual([['s']]);
+    expect(press).not.toHaveBeenCalled();
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    base.resolve();
+    await vi.waitFor(() =>
+      expect(press).toHaveBeenCalledExactlyOnceWith('w+ArrowDown', {
+        delay: 100,
+      }),
+    );
     expect(evaluate).toHaveBeenCalledTimes(1);
   } finally {
-    gate.resolve();
+    base.resolve();
+    pulse.resolve();
     expect(await completed).toBe(stop);
   }
-  expect(up.mock.calls).toEqual(down.mock.calls);
+  expect(up.mock.calls).toEqual([['s']]);
 });
 
 it('settles every release before sending the next native key set', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  plan(
+    { brakeHeld: true, pulse: 'ArrowDown' },
+    { brakeHeld: false, slowing: true, propel: true, pulse: 'a' },
+  );
   const gate = deferred<void>();
   const stop = new Error('Observed the replacement keys');
   const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
@@ -186,7 +361,8 @@ it('settles every release before sending the next native key set', async () => {
     (error: unknown) => error,
   );
   try {
-    await vi.waitFor(() => expect(up).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(up).toHaveBeenCalledTimes(1));
+    expect(up.mock.calls).toEqual([['Shift']]);
     expect(down).not.toHaveBeenCalledWith('s');
     expect(evaluate).toHaveBeenCalledTimes(2);
   } finally {
@@ -197,63 +373,67 @@ it('settles every release before sending the next native key set', async () => {
   expect(up).toHaveBeenLastCalledWith('s');
 });
 
-it('settles failed press batches before releasing every possibly delivered key', async () => {
+it('releases every possible chord delivery after a failed pulse acknowledgement', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  plan({ brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowDown' });
   const gate = deferred<void>();
   const failure = new Error('Native press acknowledgement failed');
-  const down = vi.fn<Page['keyboard']['down']>((key) =>
-    key === 'd' ? Promise.reject(failure) : gate.promise,
-  );
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
   const up = vi.fn<Page['keyboard']['up']>().mockResolvedValue();
+  const press = vi.fn<Page['keyboard']['press']>(() => gate.promise);
   const evaluate = vi
     .fn<Page['evaluate']>()
-    .mockResolvedValue(snapshot(observations[0]));
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockRejectedValue(
+      new Error('Unexpected observation before pulse acknowledgement'),
+    );
   let finished = false;
-  const completed = driveSunlit(nativePage(evaluate, down, up)).catch(
+  const completed = driveSunlit(nativePage(evaluate, down, up, press)).catch(
     (error: unknown) => {
       finished = true;
       return error;
     },
   );
   try {
-    await vi.waitFor(() => expect(down).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(press).toHaveBeenCalledTimes(1));
     expect(finished).toBe(false);
     expect(up).not.toHaveBeenCalled();
   } finally {
-    gate.resolve();
+    if (press.mock.calls.length) gate.reject(failure);
+    else gate.resolve();
     await completed;
   }
-  expect(await completed).toMatchObject({
-    name: 'AggregateError',
-    errors: [failure],
-  });
-  expect(up.mock.calls).toEqual(down.mock.calls);
+  expect(await completed).toBe(failure);
+  expect(up.mock.calls).toEqual([['w'], ['ArrowDown'], ['s']]);
   expect(evaluate).toHaveBeenCalledTimes(1);
 });
 
 it('attempts every cleanup edge and preserves both driver and release failures', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  plan({ brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowDown' });
   const pressFailure = new Error('Press acknowledgement failed');
   const releaseFailure = new Error('Release acknowledgement failed');
-  const down = vi.fn<Page['keyboard']['down']>((key) =>
-    key === 'd' ? Promise.reject(pressFailure) : Promise.resolve(),
-  );
+  const down = vi.fn<Page['keyboard']['down']>().mockResolvedValue();
+  const press = vi
+    .fn<Page['keyboard']['press']>()
+    .mockRejectedValue(pressFailure);
   const up = vi.fn<Page['keyboard']['up']>((key) =>
-    key === 'd' ? Promise.reject(releaseFailure) : Promise.resolve(),
+    key === 'w' ? Promise.reject(releaseFailure) : Promise.resolve(),
   );
   const evaluate = vi
     .fn<Page['evaluate']>()
-    .mockResolvedValue(snapshot(observations[0]));
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockRejectedValue(new Error('Unexpected observation after failed press'));
 
   const failure: unknown = await driveSunlit(
-    nativePage(evaluate, down, up),
+    nativePage(evaluate, down, up, press),
   ).catch((error: unknown) => error);
 
-  expect(up.mock.calls).toEqual(down.mock.calls);
+  expect(up.mock.calls).toEqual([['w'], ['ArrowDown']]);
   expect(failure).toMatchObject({
     name: 'AggregateError',
     errors: [
-      { name: 'AggregateError', errors: [pressFailure] },
+      pressFailure,
       { name: 'AggregateError', errors: [releaseFailure] },
     ],
   });

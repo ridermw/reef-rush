@@ -12,10 +12,11 @@ import {
   sunlitWaypoints,
 } from '../fixtures/sunlitWaypointPolicy';
 import {
-  courseKeyboardPolicy,
-  type KeyboardObservation,
-} from '../fixtures/courseKeyboardPolicy';
-import { releaseNativeKeys, setNativeKeys } from '../fixtures/nativeKeyboard';
+  pulseNativeKeys,
+  releaseNativeKeys,
+  setNativeKeys,
+} from '../fixtures/nativeKeyboard';
+import { sunlitPulsePolicy } from '../fixtures/sunlitPulsePolicy';
 import type { NativeInputRecorder } from '../fixtures/nativeInputRecorder';
 import { recordNativeInput } from '../fixtures/nativeInputRecording';
 
@@ -170,7 +171,7 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
   let waypoint = 0;
   let approachingCheckpoint = false;
   let nextRecoveryLog = 0;
-  let previous: KeyboardObservation | undefined;
+  let previousSteps: number | undefined;
   let failure: { error: unknown } | undefined;
   let state = await snapshot(page, recorder);
   const deadline = Date.now() + 120_000;
@@ -222,15 +223,30 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
         );
         nextRecoveryLog = state.frame.steps + 120;
       }
-      const keyboardObservation = { fish, steps: state.frame.steps };
-      const decision = courseKeyboardPolicy({
-        observation: keyboardObservation,
-        previous,
-        target: steering.target,
+      const decision = sunlitPulsePolicy({
+        fish,
+        steps: state.frame.steps,
+        previousSteps,
+        waypoint,
+        approachingCheckpoint,
+        checkpointIndex: race.checkpointIndex,
+        collectedPearlIds: state.collectedPearlIds,
+        brakeHeld: held.has('Shift'),
+        slowing: held.has('s'),
+        accelerating: held.has('w'),
       });
-      previous = keyboardObservation;
-      const keys = new Set<string>(decision.keys);
+      previousSteps = state.frame.steps;
+      const keys = new Set<string>([
+        ...(decision.brakeHeld ? ['Shift'] : []),
+        ...(decision.slowing ? ['s'] : []),
+        ...(decision.accelerating ? ['w'] : []),
+      ]);
       await setNativeKeys(page.keyboard, held, keys);
+      const pulse = [
+        ...(decision.propel ? ['w'] : []),
+        ...(decision.pulse === null ? [] : [decision.pulse]),
+      ];
+      if (pulse.length) await pulseNativeKeys(page.keyboard, held, pulse);
       const observed = await page.evaluate(
         ({ previous, recorder }) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
