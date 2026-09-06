@@ -137,6 +137,14 @@ const corpusSchema = z
   .strict();
 
 export function parseNativeTimingData(input: unknown): NativeTimingData {
+  return parseTimingData(input, false);
+}
+
+export function parseNativeTimingPrefix(input: unknown): NativeTimingData {
+  return parseTimingData(input, true);
+}
+
+function parseTimingData(input: unknown, prefix: boolean): NativeTimingData {
   const data = dataSchema.parse(input);
   const first = data.events[0];
   if (first.kind !== 'observation' || first.screen !== 'playing')
@@ -208,6 +216,20 @@ export function parseNativeTimingData(input: unknown): NativeTimingData {
       }
     }
     previous = current;
+  }
+  if (prefix) {
+    const last = data.events.at(-1);
+    if (
+      terminal ||
+      observations < 2 ||
+      last?.kind !== 'observation' ||
+      last.screen !== 'playing'
+    ) {
+      throw new Error(
+        'Native timing prefix must end at a running observation.',
+      );
+    }
+    return data;
   }
   if (!terminal || observations < 2 || owned.size)
     throw new Error(

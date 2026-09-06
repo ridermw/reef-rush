@@ -16,10 +16,251 @@ import { replaySunlitTiming } from '../fixtures/replaySunlitTiming';
 import { loadNativeTimingCorpus } from '../fixtures/nativeTimingCorpus';
 import { courseKeyboardPolicy } from '../fixtures/courseKeyboardPolicy';
 import { localAssetLoader } from '../fixtures/originalAssets';
+import * as control from '../fixtures/sunlitPulsePolicy';
+import {
+  advanceSunlitWaypoint,
+  sunlitSteeringTarget,
+} from '../fixtures/sunlitWaypointPolicy';
+import { loadSunlitChordWitness } from '../fixtures/sunlitChordWitness';
 
 const corpus = await loadNativeTimingCorpus();
 
 afterEach(() => vi.restoreAllMocks());
+
+const recordedChord = {
+  brakeHeld: false,
+  slowing: true,
+  propel: true,
+  pulse: 'ArrowDown',
+} as const;
+const asymmetricTiming = {
+  onsetSteps: 30,
+  holdSteps: 10,
+  observationSteps: 15,
+  skewSteps: 11,
+  releaseSkewSteps: 5,
+};
+const expectedAt893 = [
+  -4.011307389942512, -4.467194154855966, 62.625659681897,
+] as const;
+const expectedAt964 = [
+  -5.089150446517422, -4.881345323881319, 64.54595914329225,
+] as const;
+
+it.each([
+  [893, 41, expectedAt893],
+  [964, 46, expectedAt964],
+] as const)(
+  'recorded asymmetric chord reaches step %i from original spawn',
+  async (steps, sequence, expectedPosition) => {
+    const data = await loadSunlitChordWitness();
+    const loads = vi.spyOn(localAssetLoader, 'loadAsync');
+    const frames = vi.spyOn(InputController.prototype, 'readFrame');
+    const result = await replaySunlitTiming(
+      { ...data, events: data.events.slice(0, sequence + 1) },
+      { mode: 'motion', scenario: `asymmetric-${steps}` },
+    );
+    expect(result.steps).toBe(steps);
+    expect(result.decisions).toBe(0);
+    expect(result.snapshot.race).toMatchObject({
+      status: 'running',
+      checkpointIndex: 3,
+      pearlCount: 2,
+    });
+    expect(result.snapshot.collectedPearlIds).toEqual([
+      'pearl-entry',
+      'pearl-bend',
+    ]);
+    expect(
+      Math.hypot(
+        ...result.snapshot.fish.position.map(
+          (value, axis) => value - expectedPosition[axis],
+        ),
+      ),
+    ).toBeLessThanOrEqual(0.001);
+    expect(loads.mock.calls.map(([url]) => url).sort()).toEqual([
+      '/reef-rush/assets/courses/sunlit-shoals.collision.glb',
+      '/reef-rush/assets/courses/sunlit-shoals.visual.glb',
+      '/reef-rush/assets/fish/sunfin.glb',
+    ]);
+    expect(result.assetOwnership).toEqual({
+      entries: 0,
+      reservations: 0,
+      geometries: 0,
+      materials: 0,
+      textures: 0,
+    });
+    expect(result.released).toEqual({
+      lifecycle: 'disposed',
+      bodies: 0,
+      colliders: 0,
+      geometries: 0,
+      materials: 0,
+    });
+    expect(frames).toHaveBeenCalledTimes(steps);
+    if (steps === 964) {
+      const frame = (index: number) => {
+        const read = frames.mock.results[index];
+        if (read?.type !== 'return')
+          throw new Error(`Missing replay input frame ${index}.`);
+        return read.value;
+      };
+      expect(frame(923).throttle).toBe(0);
+      expect(frame(934).steerY).toBe(-1);
+      expect(frame(944).steerY).toBe(0);
+      expect(frame(949).throttle).toBe(-1);
+    }
+    console.info(
+      JSON.stringify({
+        asymmetricReplaySteps: steps,
+        observations: result.observations,
+        position: result.snapshot.fish.position,
+        maxErrors: result.maxErrors,
+      }),
+    );
+  },
+);
+
+it('matches all four asymmetric model edges to the untouched recorded chord', async () => {
+  const data = await loadSunlitChordWitness();
+  const delivered = control.sunlitPulseTimeline(
+    false,
+    recordedChord,
+    asymmetricTiming,
+    true,
+  );
+  expect(
+    delivered.events.map((event) => ({
+      steps: event.at + 893,
+      code: event.key === 'w' ? 'KeyW' : event.key,
+      type: event.type,
+    })),
+  ).toEqual(
+    data.events.slice(42, 46).map((event) => {
+      if (event.kind !== 'key') throw new Error('Missing recorded chord key.');
+      return { steps: event.steps, code: event.code, type: event.type };
+    }),
+  );
+  expect(delivered.observeAt).toBe(71);
+  expect(delivered.events.some((event) => event.key === 's')).toBe(false);
+});
+
+it('bridges asymmetric prediction to original runtime and rejects the symmetric phase model', async () => {
+  const data = await loadSunlitChordWitness();
+  const before = await replaySunlitTiming(
+    { ...data, events: data.events.slice(0, 42) },
+    { mode: 'motion', scenario: 'asymmetric-bridge-before' },
+  );
+  const after = await replaySunlitTiming(data, {
+    mode: 'motion',
+    scenario: 'asymmetric-bridge-after',
+  });
+  const original = structuredClone(before.snapshot);
+  const route = {
+    position: before.snapshot.fish.position,
+    checkpointIndex: before.snapshot.race.checkpointIndex,
+    pearlCount: before.snapshot.race.pearlCount,
+  };
+  const waypoint = advanceSunlitWaypoint(0, route);
+  const target = sunlitSteeringTarget(waypoint, route);
+  expect(waypoint).toBe(5);
+  expect(target.approachingCheckpoint).toBe(false);
+  const observed = {
+    fish: before.snapshot.fish,
+    steps: before.steps,
+    waypoint,
+    approachingCheckpoint: target.approachingCheckpoint,
+    brakeHeld: false,
+    slowing: true,
+    checkpointIndex: before.snapshot.race.checkpointIndex,
+    collectedPearlIds: before.snapshot.collectedPearlIds,
+  };
+  const forecast = control.predictSunlitPulse(
+    observed,
+    recordedChord,
+    asymmetricTiming,
+  );
+  expect(forecast.evaluationAt).toBe(71);
+  expect(forecast.boundaryFish).toBe(forecast.evaluationFish);
+  const errors = {
+    position: 0,
+    velocity: 0,
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    dashEnergy: Math.abs(
+      forecast.boundaryFish.dashEnergy - after.snapshot.fish.dashEnergy,
+    ),
+  };
+  for (const key of ['position', 'velocity'] as const) {
+    errors[key] = Math.hypot(
+      ...forecast.boundaryFish[key].map(
+        (value, axis) => value - after.snapshot.fish[key][axis],
+      ),
+    );
+    expect(errors[key]).toBeLessThanOrEqual(0.001);
+  }
+  for (const key of ['yaw', 'pitch', 'roll'] as const) {
+    const delta = forecast.boundaryFish[key] - after.snapshot.fish[key];
+    errors[key] = Math.abs(Math.atan2(Math.sin(delta), Math.cos(delta)));
+    expect(errors[key]).toBeLessThanOrEqual(0.00001);
+  }
+  expect(errors.dashEnergy).toBeLessThanOrEqual(0.00000001);
+  expect(forecast.boundaryFish.isSubmerged).toBe(
+    after.snapshot.fish.isSubmerged,
+  );
+  const goals = control.sunlitPulseGoals(observed, true);
+  expect(goals[forecast.boundaryGoalIndex]?.id).toBe('pearl-passage');
+  const passage = goals.findIndex((goal) => goal.id === 'pearl-passage');
+  expect(passage).toBe(0);
+  const contact = forecast.contacts[passage];
+  expect(contact === null || contact > 71).toBe(true);
+  expect(after.snapshot.collectedPearlIds).not.toContain('pearl-passage');
+  const symmetricForecast = control.predictSunlitPulse(
+    observed,
+    recordedChord,
+    {
+      onsetSteps: 30,
+      holdSteps: 10,
+      observationSteps: 15,
+      skewSteps: 8,
+    },
+  );
+  expect(symmetricForecast.evaluationAt).toBe(71);
+  const symmetricPositionError = Math.hypot(
+    ...symmetricForecast.boundaryFish.position.map(
+      (value, axis) => value - after.snapshot.fish.position[axis],
+    ),
+  );
+  expect(symmetricPositionError).toBeGreaterThan(0.001);
+  expect(before.snapshot).toEqual(original);
+  console.info(
+    JSON.stringify({
+      asymmetricForecastErrors: errors,
+      symmetricPositionError,
+    }),
+  );
+});
+
+it('rejects the same-length symmetric phase in asymmetric original-runtime replay', async () => {
+  const data = await loadSunlitChordWitness();
+  const shifted = {
+    ...data,
+    events: data.events.map((event) =>
+      event.kind === 'key' && (event.sequence === 43 || event.sequence === 44)
+        ? { ...event, steps: event.steps - 3 }
+        : event,
+    ),
+  };
+  await expect(
+    replaySunlitTiming(shifted, {
+      mode: 'motion',
+      scenario: 'asymmetric-negative',
+    }),
+  ).rejects.toThrow(/record 46 step 964 position/);
+  expect(data.events[43].steps).toBe(934);
+  expect(data.events[44].steps).toBe(944);
+});
 
 const definition = parseCourseDefinition({
   ...courseFixture(),

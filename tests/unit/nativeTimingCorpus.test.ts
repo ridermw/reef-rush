@@ -8,6 +8,8 @@ import {
   type NativeTimingCorpus,
 } from '../fixtures/nativeTimingCorpus';
 import type { NativeTimingData } from '../fixtures/nativeInputRecorder';
+import * as timingPrefix from '../fixtures/nativeTimingCorpus';
+import * as chordWitness from '../fixtures/sunlitChordWitness';
 
 // The cast supplies fixture inputs; the parsers must independently validate unknown data.
 const raw = JSON.parse(
@@ -16,6 +18,127 @@ const raw = JSON.parse(
     'utf8',
   ),
 ) as NativeTimingCorpus;
+
+const rawChord = JSON.parse(
+  await readFile(
+    resolve(
+      'tests',
+      'fixtures',
+      'native-timing',
+      'sunlit-34013534603-prefix-964.json',
+    ),
+    'utf8',
+  ),
+) as NativeTimingData;
+
+function prefixParser() {
+  expect(timingPrefix.parseNativeTimingPrefix).toBeTypeOf('function');
+  return timingPrefix.parseNativeTimingPrefix;
+}
+
+it('loads the pinned asymmetric prefix frozen with exact provenance and retained S', async () => {
+  expect(chordWitness.loadSunlitChordWitness).toBeTypeOf('function');
+  const data = await chordWitness.loadSunlitChordWitness();
+  expect(chordWitness.SUNLIT_CHORD_PROVENANCE).toEqual({
+    repository: 'ridermw/reef-rush',
+    revision: '3875ba6034b1021587b122a28198ba3cfc2d866f',
+    runId: 34013534603,
+    jobId: 101433321625,
+    eventCount: 47,
+    fullSha256:
+      'ae658f6a3fe320a6ebaa1314bc18870d8d81990cd557cc7a2046308504bb1cc5',
+    prefixSha256:
+      'af2f2da6e28032d0a5ccdec4d838266f99fd5f83c18b066b47193766338b0d83',
+  });
+  expect(Object.isFrozen(chordWitness.SUNLIT_CHORD_PROVENANCE)).toBe(true);
+  expect(data.events).toHaveLength(47);
+  expect(data.events[0]).toMatchObject({
+    sequence: 0,
+    steps: 50,
+    kind: 'observation',
+  });
+  expect(data.events[41]).toMatchObject({
+    sequence: 41,
+    steps: 893,
+    kind: 'observation',
+  });
+  expect(data.events[46]).toMatchObject({
+    sequence: 46,
+    steps: 964,
+    kind: 'observation',
+  });
+  expect(Object.isFrozen(data)).toBe(true);
+  expect(Object.isFrozen(data.events)).toBe(true);
+  expect(Object.isFrozen(data.events[41])).toBe(true);
+  expect(Object.isFrozen(observation(data).anchor.player?.position)).toBe(true);
+  const held = new Set<string>();
+  for (const event of data.events) {
+    if (event.kind !== 'key') continue;
+    if (event.type === 'keydown') held.add(event.code);
+    else held.delete(event.code);
+  }
+  expect([...held]).toEqual(['KeyS']);
+  expect(chordWitness.parseSunlitChordWitness(rawChord)).toEqual(data);
+  expect(prefixParser()(rawChord)).toEqual(data);
+});
+
+it('accepts the running prefix only through its explicit parser', () => {
+  expect(prefixParser()(rawChord).events).toHaveLength(47);
+  expect(() => parseNativeTimingData(rawChord)).toThrow(
+    'Native timing lacks a complete terminal observation or key cleanup.',
+  );
+});
+
+it('rejects complete and key-ended tapes as prefixes', () => {
+  const parse = prefixParser();
+  expect(() => parse(raw.cases[0].data)).toThrow(
+    'Native timing prefix must end at a running observation.',
+  );
+  expect(() =>
+    parse({ ...rawChord, events: rawChord.events.slice(0, -1) }),
+  ).toThrow('Native timing prefix must end at a running observation.');
+});
+
+it('accepts all eight distinct supported keys in a generic running prefix', () => {
+  const parse = prefixParser();
+  const first = rawChord.events[0];
+  const template = key(rawChord);
+  const codes = [
+    'KeyW',
+    'KeyS',
+    'KeyA',
+    'KeyD',
+    'ArrowUp',
+    'ArrowDown',
+    'ShiftLeft',
+    'ShiftRight',
+  ];
+  const events = [
+    first,
+    ...codes.map((code, index) => ({
+      ...template,
+      code,
+      steps: first.steps,
+      rendered: first.rendered,
+      time: first.time,
+      sequence: index + 1,
+    })),
+    { ...first, sequence: 9 },
+  ];
+  expect(parse({ version: 1, failure: null, events }).events).toHaveLength(10);
+});
+
+it('rejects asymmetric prefix timestamp corruption before schema projection', () => {
+  expect(chordWitness.parseSunlitChordWitness).toBeTypeOf('function');
+  const changed = structuredClone(rawChord);
+  Object.assign(changed.events[42], { time: changed.events[42].time + 1 });
+  expect(() => chordWitness.parseSunlitChordWitness(changed)).toThrow(
+    'Sunlit chord prefix checksum mismatch.',
+  );
+  expect(() => chordWitness.parseSunlitChordWitness(undefined)).toThrow(
+    'Sunlit chord prefix checksum mismatch.',
+  );
+});
 
 function parsers() {
   expect(parseNativeTimingData).toBeTypeOf('function');
@@ -232,6 +355,35 @@ it.each(mutations)(
     const data = structuredClone(raw.cases[0].data);
     mutate(data);
     expect(() => p.data(data)).toThrow();
+  },
+);
+
+it.each(
+  mutations.filter(
+    ([name]) => name !== 'missing probe' && name !== 'missing terminal',
+  ),
+)('prefix wire validation rejects %s without a checksum', (_name, mutate) => {
+  const parse = prefixParser();
+  const data = structuredClone(rawChord);
+  mutate(data);
+  expect(() => parse(data)).toThrow();
+});
+
+it.each(['duplicate', 'unowned release'])(
+  'rejects %s prefix ownership without imposing a smaller key cap',
+  (kind) => {
+    const parse = prefixParser();
+    const data = structuredClone(rawChord);
+    const down = key(data);
+    if (kind === 'unowned release') Object.assign(down, { type: 'keyup' });
+    else {
+      const events = [...data.events];
+      events.splice(down.sequence + 1, 0, { ...down });
+      Object.assign(data, {
+        events: events.map((event, sequence) => ({ ...event, sequence })),
+      });
+    }
+    expect(() => parse(data)).toThrow(/ownership/);
   },
 );
 

@@ -26,6 +26,272 @@ function scenarios() {
 
 const timing = { onsetSteps: 12, holdSteps: 8, observationSteps: 6 };
 
+const recordedChord = {
+  brakeHeld: false,
+  slowing: true,
+  propel: true,
+  pulse: 'ArrowDown',
+} as const;
+const asymmetricTiming = {
+  onsetSteps: 30,
+  holdSteps: 10,
+  observationSteps: 15,
+  skewSteps: 11,
+  releaseSkewSteps: 5,
+};
+
+describe('asymmetric release skew', () => {
+  it('represents the recorded chord with S retained', () => {
+    expect(
+      control.sunlitPulseTimeline(false, recordedChord, asymmetricTiming, true),
+    ).toEqual({
+      age: 10,
+      events: [
+        { at: 30, key: 'w', type: 'keydown' },
+        { at: 41, key: 'ArrowDown', type: 'keydown' },
+        { at: 51, key: 'ArrowDown', type: 'keyup' },
+        { at: 56, key: 'w', type: 'keyup' },
+      ],
+      observeAt: 71,
+    });
+  });
+
+  it('uses completion for common valuation and risk truncation, not no-op observation', () => {
+    const start = { ...observation(), slowing: true };
+    const predicted = control.predictSunlitPulse(
+      start,
+      recordedChord,
+      asymmetricTiming,
+    );
+    expect([predicted.evaluationAt, predicted.interventionAt]).toEqual([
+      71, 179,
+    ]);
+    expect(predicted.boundaryFish).toBe(predicted.evaluationFish);
+    const idle = { brakeHeld: false, slowing: true, pulse: null };
+    expect(
+      control.sunlitPulseTimeline(false, idle, asymmetricTiming, true),
+    ).toEqual({ age: 10, events: [], observeAt: 25 });
+    const noOp = control.predictSunlitPulse(start, idle, asymmetricTiming);
+    expect(noOp.evaluationAt).toBe(71);
+    expect(noOp.boundaryFish).not.toEqual(noOp.evaluationFish);
+  });
+
+  it.each([
+    { brakeHeld: false, slowing: true, propel: true, pulse: null },
+    { brakeHeld: false, slowing: true, pulse: 'ArrowDown' as const },
+  ])('does not invent a second key for $pulse/$propel', (command) => {
+    const delivered = control.sunlitPulseTimeline(
+      false,
+      command,
+      asymmetricTiming,
+      true,
+    );
+    expect(delivered.events.map((edge) => edge.at)).toEqual([30, 40]);
+    expect(delivered.observeAt).toBe(55);
+    expect(
+      control.predictSunlitPulse(
+        { ...observation(), slowing: true },
+        command,
+        asymmetricTiming,
+      ).evaluationAt,
+    ).toBe(71);
+  });
+
+  it('accepts zero release skew while preserving reverse release order', () => {
+    const value = { ...asymmetricTiming, releaseSkewSteps: 0 };
+    const delivered = control.sunlitPulseTimeline(
+      false,
+      recordedChord,
+      value,
+      true,
+    );
+    expect(delivered.events.slice(-2)).toEqual([
+      { at: 51, key: 'ArrowDown', type: 'keyup' },
+      { at: 51, key: 'w', type: 'keyup' },
+    ]);
+    expect(delivered.observeAt).toBe(66);
+  });
+
+  it('keeps all zero-length chord edges ordered at zero', () => {
+    const value = {
+      onsetSteps: 0,
+      holdSteps: 0,
+      observationSteps: 1,
+      skewSteps: 0,
+      releaseSkewSteps: 0,
+    };
+    expect(
+      control.sunlitPulseTimeline(false, recordedChord, value, true),
+    ).toEqual({
+      age: 0,
+      events: [
+        { at: 0, key: 'w', type: 'keydown' },
+        { at: 0, key: 'ArrowDown', type: 'keydown' },
+        { at: 0, key: 'ArrowDown', type: 'keyup' },
+        { at: 0, key: 'w', type: 'keyup' },
+      ],
+      observeAt: 1,
+    });
+    expect(
+      control.predictSunlitPulse(
+        { ...observation(), slowing: true },
+        recordedChord,
+        value,
+      ).evaluationAt,
+    ).toBe(1);
+  });
+
+  it.each([
+    null,
+    '5',
+    true,
+    false,
+    -1,
+    0.5,
+    NaN,
+    Infinity,
+    -Infinity,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])(
+    'rejects invalid release skew %s even without operations',
+    (releaseSkewSteps) => {
+      const value: control.SunlitPulseTiming = { ...timing };
+      Object.assign(value, { releaseSkewSteps });
+      for (const command of [
+        recordedChord,
+        { brakeHeld: false, slowing: true, pulse: null },
+      ]) {
+        expect(() =>
+          control.sunlitPulseTimeline(false, command, value, true),
+        ).toThrow(
+          new RangeError('Pulse timing requires bounded integer counters.'),
+        );
+      }
+    },
+  );
+
+  it('accepts the exact prediction horizon without capping general timelines', () => {
+    const value = {
+      onsetSteps: 0,
+      holdSteps: 0,
+      observationSteps: 1,
+      skewSteps: 0,
+      releaseSkewSteps: 239,
+    };
+    const start = { ...observation(), slowing: true };
+    const predicted = control.predictSunlitPulse(start, recordedChord, value);
+    expect([
+      predicted.evaluationAt,
+      predicted.interventionAt,
+      predicted.motionSteps,
+    ]).toEqual([240, 240, 240]);
+    const beyond = { ...value, releaseSkewSteps: 240 };
+    expect(
+      control.sunlitPulseTimeline(false, recordedChord, beyond, true).observeAt,
+    ).toBe(241);
+    expect(() =>
+      control.predictSunlitPulse(start, recordedChord, beyond),
+    ).toThrow(
+      new RangeError('Pulse observation exceeds the prediction horizon.'),
+    );
+  });
+
+  it('rejects unsafe completion without clamping', () => {
+    const value = {
+      onsetSteps: 0,
+      holdSteps: 0,
+      observationSteps: 1,
+      skewSteps: 0,
+      releaseSkewSteps: Number.MAX_SAFE_INTEGER,
+    };
+    expect(() =>
+      control.sunlitPulseTimeline(false, recordedChord, value, true),
+    ).toThrow(
+      new RangeError('Pulse timing requires bounded integer counters.'),
+    );
+    expect(
+      control.sunlitPulseTimeline(
+        false,
+        recordedChord,
+        {
+          ...value,
+          releaseSkewSteps: Number.MAX_SAFE_INTEGER - 1,
+        },
+        true,
+      ).observeAt,
+    ).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('retains no-op time with valid huge unused skews but rejects its forecast horizon', () => {
+    const idle = { brakeHeld: false, slowing: true, pulse: null };
+    const value = {
+      ...asymmetricTiming,
+      skewSteps: Number.MAX_SAFE_INTEGER,
+      releaseSkewSteps: Number.MAX_SAFE_INTEGER,
+    };
+    expect(control.sunlitPulseTimeline(false, idle, value, true)).toEqual({
+      age: 10,
+      events: [],
+      observeAt: 25,
+    });
+    expect(() =>
+      control.predictSunlitPulse(
+        { ...observation(), slowing: true },
+        idle,
+        value,
+      ),
+    ).toThrow(
+      new RangeError('Pulse observation exceeds the prediction horizon.'),
+    );
+  });
+
+  it('retains legacy nullish press skew behavior', () => {
+    const legacy: control.SunlitPulseTiming = { ...timing };
+    Object.assign(legacy, { skewSteps: null });
+    expect(
+      control.sunlitPulseTimeline(false, recordedChord, legacy, true),
+    ).toEqual(control.sunlitPulseTimeline(false, recordedChord, timing, true));
+  });
+
+  it('preserves complete default forecasts for all 25 commands and four timings', () => {
+    const start = observation();
+    const declared = control.sunlitPulseScenarios(start.steps);
+    const timings: readonly control.SunlitPulseTiming[] = [
+      ...declared,
+      { ...declared[0], holdSteps: 18 },
+    ];
+    let checked = 0;
+    for (const mode of [
+      { brakeHeld: false },
+      { brakeHeld: false, accelerating: true },
+      { brakeHeld: true },
+      { brakeHeld: false, slowing: true },
+      { brakeHeld: false, slowing: true, propel: true },
+    ]) {
+      for (const pulse of [null, 'a', 'd', 'ArrowUp', 'ArrowDown'] as const) {
+        const command = { ...mode, pulse };
+        for (const value of timings) {
+          const expected = control.predictSunlitPulse(start, command, value);
+          expect(
+            control.predictSunlitPulse(start, command, {
+              ...value,
+              releaseSkewSteps: undefined,
+            }),
+          ).toEqual(expected);
+          expect(
+            control.predictSunlitPulse(start, command, {
+              ...value,
+              releaseSkewSteps: value.skewSteps ?? 2,
+            }),
+          ).toEqual(expected);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBe(100);
+  });
+});
+
 it('does not solve pearl intersections for disjoint movement boxes', () => {
   const start = {
     ...observation(),

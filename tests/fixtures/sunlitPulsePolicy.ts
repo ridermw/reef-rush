@@ -36,6 +36,7 @@ export interface SunlitPulseTiming {
   readonly holdSteps: number;
   readonly observationSteps: number;
   readonly skewSteps?: number;
+  readonly releaseSkewSteps?: number;
 }
 
 export interface SunlitPulseEdge {
@@ -196,6 +197,15 @@ function counter(value: number, minimum = 0) {
     throw new RangeError('Pulse timing requires bounded integer counters.');
 }
 
+function pulseSkews(timing: SunlitPulseTiming) {
+  const press = timing.skewSteps ?? 2;
+  const release =
+    timing.releaseSkewSteps === undefined ? press : timing.releaseSkewSteps;
+  counter(press);
+  counter(release);
+  return { press, release };
+}
+
 export function sunlitPulseTimeline(
   oldBrake: boolean,
   command: SunlitPulseCommand,
@@ -206,8 +216,7 @@ export function sunlitPulseTimeline(
   counter(timing.onsetSteps);
   counter(timing.holdSteps);
   counter(timing.observationSteps, 1);
-  const skew = timing.skewSteps ?? 2;
-  counter(skew);
+  const { press, release } = pulseSkews(timing);
   if (
     typeof oldBrake !== 'boolean' ||
     typeof oldSlowing !== 'boolean' ||
@@ -259,14 +268,19 @@ export function sunlitPulseTimeline(
     }
   }
   for (const [index, key] of pulseKeys.entries()) {
-    events.push({ at: timing.onsetSteps + index * skew, key, type: 'keydown' });
+    events.push({
+      at: timing.onsetSteps + index * press,
+      key,
+      type: 'keydown',
+    });
   }
   for (let index = pulseKeys.length - 1; index >= 0; index--) {
     events.push({
       at:
         timing.onsetSteps +
-        (2 * (pulseKeys.length - 1) - index) * skew +
-        timing.holdSteps,
+        (pulseKeys.length - 1) * press +
+        timing.holdSteps +
+        (pulseKeys.length - 1 - index) * release,
       key: pulseKeys[index],
       type: 'keyup',
     });
@@ -526,10 +540,12 @@ function predictPulse(
   );
   // Value every candidate at the longest supported command cycle, not its own
   // earlier or later observation. Actual observations keep their original times.
+  const { press, release } = pulseSkews(timing);
   const evaluationAt =
     timing.onsetSteps +
     timing.holdSteps +
-    2 * (timing.skewSteps ?? 2) +
+    press +
+    release +
     timing.observationSteps;
   if (timeline.observeAt > horizon || evaluationAt > horizon)
     throw new RangeError('Pulse observation exceeds the prediction horizon.');
