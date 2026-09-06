@@ -1,3 +1,4 @@
+// BEGIN FROZEN SCALAR SOURCE
 import sunlit from '../../src/content/courses/sunlitShoals';
 import type { SceneSnapshot } from '../../src/game/core/SceneRuntime';
 import {
@@ -8,7 +9,6 @@ import type {
   CourseDefinition,
   Vector3,
 } from '../../src/game/course/courseDefinition';
-import type { InputFrame } from '../../src/game/input/InputFrame';
 import { CurrentVolume } from '../../src/game/obstacles/CurrentVolume';
 import {
   stepFishMotion,
@@ -20,12 +20,6 @@ import {
   pickupFraction,
 } from '../../src/game/race/raceGeometry';
 import { scaleIntersection } from '../../src/game/race/raceIntersection';
-import {
-  compileSunlitPulseTopology,
-  type SunlitPulsePath,
-  type SunlitPulseTopology,
-  type SunlitPulseTopologyWork,
-} from './sunlitPulseTopology';
 import { sunlitWaypoints } from './sunlitWaypointPolicy';
 
 export type SunlitPulseKey = 'a' | 'd' | 'ArrowUp' | 'ArrowDown';
@@ -65,52 +59,6 @@ export interface SunlitPulseObservation {
   readonly approachingCheckpoint: boolean;
 }
 
-export type SunlitPulseForecast = ReturnType<typeof predictSunlitPulse>;
-export type SunlitPulseWork = SunlitPulseTopologyWork;
-
-export interface SunlitPulseMatrix {
-  readonly candidates: readonly {
-    readonly command: SunlitPulseCommand;
-    readonly forecasts: readonly SunlitPulseForecast[];
-  }[];
-  readonly work: SunlitPulseWork;
-}
-
-export interface CompiledSunlitPulseEvaluator {
-  readonly bounds: readonly (SunlitPulseWork & { readonly mask: number })[];
-  evaluate(observed: SunlitPulseObservation): SunlitPulseMatrix;
-}
-
-interface PropagationState {
-  fish: FishState;
-  awarded: boolean[];
-  awardAt: number[];
-  contacts: Array<number | null>;
-  clearance: number[];
-  irreversibleMiss: number[];
-  activeGoal: number;
-}
-
-interface PropagationContext {
-  readonly goals: readonly SunlitPulseGoal[];
-  readonly initiallyQualified: number;
-  readonly waypoint: number;
-  readonly brakeHeld: boolean;
-  readonly slowing: boolean;
-  readonly accelerating: boolean;
-}
-
-interface PulsePlan {
-  readonly observeAt: number;
-  readonly evaluationAt: number;
-  readonly interventionAt: number;
-}
-
-interface PulseProgram {
-  readonly topology: SunlitPulseTopology;
-  readonly plans: readonly PulsePlan[];
-}
-
 interface GoalBase {
   readonly id: string;
   readonly position: Vector3;
@@ -145,32 +93,6 @@ const currents = sunlit.objects
     return Object.freeze({ velocity, minimum, maximum });
   });
 const horizon = 240;
-const commands: readonly SunlitPulseCommand[] = Object.freeze(
-  [
-    { brakeHeld: false },
-    { brakeHeld: false, accelerating: true },
-    { brakeHeld: true },
-    { brakeHeld: false, slowing: true },
-    { brakeHeld: false, slowing: true, propel: true },
-  ].flatMap((mode) =>
-    ([null, 'a', 'd', 'ArrowUp', 'ArrowDown'] as const).map((pulse) =>
-      Object.freeze({ ...mode, pulse }),
-    ),
-  ),
-);
-const symbolFrames: readonly Readonly<InputFrame>[] = Object.freeze(
-  Array.from({ length: 108 }, (_, symbol) => {
-    const frame = Math.floor(symbol / 2);
-    return Object.freeze({
-      steerY: (frame % 3) - 1,
-      steerX: (Math.floor(frame / 3) % 3) - 1,
-      throttle: (Math.floor(frame / 9) % 3) - 1,
-      brakeHeld: frame >= 27,
-      dashPressed: false,
-      pausePressed: false,
-    });
-  }),
-);
 
 function currentAt(position: Vector3): [number, number, number] {
   const result: [number, number, number] = [0, 0, 0];
@@ -588,74 +510,14 @@ export function predictSunlitPulse(
   command: SunlitPulseCommand,
   timing: SunlitPulseTiming,
 ) {
-  const plan = validatePrediction(observed, command, timing);
-  const { state, context } = createPropagation(observed);
-  let boundaryFish = state.fish;
-  let evaluationFish = state.fish;
-  let brakeHeld = observed.brakeHeld;
-  let slowing = observed.slowing ?? false;
-  let propelling = observed.accelerating ?? false;
-  let steerX = 0;
-  let steerY = 0;
-  let nextEvent = 0;
-  for (let tick = 0; tick < horizon; tick++) {
-    while (plan.timeline.events[nextEvent]?.at === tick) {
-      const event = plan.timeline.events[nextEvent++];
-      const down = event.type === 'keydown';
-      if (event.key === 'Shift') brakeHeld = down;
-      else if (event.key === 's') slowing = down;
-      else if (event.key === 'w') propelling = down;
-      else if (event.key === 'a' || event.key === 'd')
-        steerX = down ? (event.key === 'a' ? 1 : -1) : 0;
-      else steerY = down ? (event.key === 'ArrowUp' ? 1 : -1) : 0;
-    }
-    const completed = tick + 1;
-    advanceOwned(
-      state,
-      context,
-      {
-        steerX,
-        steerY,
-        brakeHeld,
-        throttle: Number(propelling) - Number(slowing),
-        dashPressed: false,
-        pausePressed: false,
-      },
-      completed,
-      completed === plan.observeAt,
-      completed <= plan.interventionAt,
-    );
-    if (completed === plan.observeAt) boundaryFish = state.fish;
-    if (completed === plan.evaluationAt) evaluationFish = state.fish;
-  }
-  return finalizePulse(
-    state,
-    context,
-    command,
-    plan,
-    horizon,
-    boundaryFish,
-    evaluationFish,
-  );
+  return predictPulse(observed, command, timing, true);
 }
 
-function pulseEvaluationAt(timing: SunlitPulseTiming, observeAt: number) {
-  const { press, release } = pulseSkews(timing);
-  const evaluationAt =
-    timing.onsetSteps +
-    timing.holdSteps +
-    press +
-    release +
-    timing.observationSteps;
-  if (observeAt > horizon || evaluationAt > horizon)
-    throw new RangeError('Pulse observation exceeds the prediction horizon.');
-  return evaluationAt;
-}
-
-function validatePrediction(
+function predictPulse(
   observed: SunlitPulseObservation,
   command: SunlitPulseCommand,
   timing: SunlitPulseTiming,
+  diagnosticTail: boolean,
 ) {
   counter(observed.steps);
   const original = observed.fish;
@@ -679,7 +541,15 @@ function validatePrediction(
   );
   // Value every candidate at the longest supported command cycle, not its own
   // earlier or later observation. Actual observations keep their original times.
-  const evaluationAt = pulseEvaluationAt(timing, timeline.observeAt);
+  const { press, release } = pulseSkews(timing);
+  const evaluationAt =
+    timing.onsetSteps +
+    timing.holdSteps +
+    press +
+    release +
+    timing.observationSteps;
+  if (timeline.observeAt > horizon || evaluationAt > horizon)
+    throw new RangeError('Pulse observation exceeds the prediction horizon.');
   // The next delivery is independent of this one; a prompt observation cannot
   // promise a prompt correction. This is a synthetic stress case, not a bound.
   const correctionSteps = Math.max(
@@ -688,27 +558,7 @@ function validatePrediction(
     ),
   );
   const interventionAt = Math.min(horizon, evaluationAt + correctionSteps);
-  return {
-    timeline,
-    observeAt: timeline.observeAt,
-    evaluationAt,
-    interventionAt,
-  };
-}
-
-function copyFish(fish: SceneSnapshot['fish']): FishState {
-  return {
-    ...fish,
-    position: [...fish.position],
-    velocity: [...fish.velocity],
-  };
-}
-
-function createPropagation(observed: SunlitPulseObservation): {
-  context: PropagationContext;
-  state: PropagationState;
-} {
-  const original = observed.fish;
+  const motionSteps = diagnosticTail ? horizon : interventionAt;
   const goals = sunlitPulseGoals(observed, true);
   const awarded = goals.map((goal) =>
     goal.kind === 'checkpoint'
@@ -735,153 +585,131 @@ function createPropagation(observed: SunlitPulseObservation): {
       initiallyQualified++;
     }
   }
-  return {
-    context: Object.freeze({
-      goals,
-      initiallyQualified,
-      waypoint: observed.waypoint,
-      brakeHeld: observed.brakeHeld,
-      slowing: observed.slowing ?? false,
-      accelerating: observed.accelerating ?? false,
-    }),
-    state: {
-      fish: copyFish(original),
-      awarded,
-      awardAt,
-      contacts,
-      clearance,
-      irreversibleMiss,
-      activeGoal: initiallyQualified,
-    },
+  let fish: FishState = {
+    ...original,
+    position: [...original.position],
+    velocity: [...original.velocity],
   };
-}
-
-function forkState(parent: PropagationState): PropagationState {
-  return {
-    ...parent,
-    awarded: parent.awarded.slice(),
-    awardAt: parent.awardAt.slice(),
-    contacts: parent.contacts.slice(),
-    clearance: parent.clearance.slice(),
-    irreversibleMiss: parent.irreversibleMiss.slice(),
-  };
-}
-
-function advanceOwned(
-  state: PropagationState,
-  context: PropagationContext,
-  input: Readonly<InputFrame>,
-  completed: number,
-  observeRecovery: boolean,
-  riskActive: boolean,
-) {
-  const { goals } = context;
-  const { awarded, awardAt, contacts, clearance, irreversibleMiss } = state;
-  const previous = state.fish.position;
-  state.fish = stepFishMotion(
-    state.fish,
-    input,
-    SCENE_FISH_TUNING,
-    { current: currentAt(state.fish.position), waterSurfaceY: 0 },
-    1 / 60,
-  ).next;
-  const fish = state.fish;
-  const tick = completed - 1;
-  for (let index = state.activeGoal; index < goals.length; index++) {
-    if (contacts[index] !== null) {
-      state.activeGoal = index + 1;
-      continue;
+  let boundaryFish = fish;
+  let evaluationFish = fish;
+  let brakeHeld = observed.brakeHeld;
+  let slowing = observed.slowing ?? false;
+  let propelling = observed.accelerating ?? false;
+  let steerX = 0;
+  let steerY = 0;
+  let nextEvent = 0;
+  let activeGoal = initiallyQualified;
+  for (let tick = 0; tick < motionSteps; tick++) {
+    while (timeline.events[nextEvent]?.at === tick) {
+      const event = timeline.events[nextEvent++];
+      const down = event.type === 'keydown';
+      if (event.key === 'Shift') brakeHeld = down;
+      else if (event.key === 's') slowing = down;
+      else if (event.key === 'w') propelling = down;
+      else if (event.key === 'a' || event.key === 'd')
+        steerX = down ? (event.key === 'a' ? 1 : -1) : 0;
+      else steerY = down ? (event.key === 'ArrowUp' ? 1 : -1) : 0;
     }
-    const eligible = index === 0 ? 0 : contacts[index - 1];
-    if (eligible === null || eligible > completed) break;
-    const goal = goals[index];
-    const fraction = Math.max(0, eligible - tick);
-    const from = between(previous, fish.position, fraction);
-    if (goal.kind === 'recovery') {
-      if (observeRecovery) {
-        const remaining = distance(fish.position, goal.position);
-        clearance[index] = Math.max(0, remaining - (goal.radius - 0.15));
-        if (remaining <= goal.radius) contacts[index] = completed;
+    const previous = fish.position;
+    fish = stepFishMotion(
+      fish,
+      {
+        steerX,
+        steerY,
+        brakeHeld,
+        throttle: Number(propelling) - Number(slowing),
+        dashPressed: false,
+        pausePressed: false,
+      },
+      SCENE_FISH_TUNING,
+      { current: currentAt(fish.position), waterSurfaceY: 0 },
+      1 / 60,
+    ).next;
+    const completed = tick + 1;
+    if (completed === timeline.observeAt) boundaryFish = fish;
+    if (completed === evaluationAt) evaluationFish = fish;
+    for (let index = activeGoal; index < goals.length; index++) {
+      if (contacts[index] !== null) {
+        activeGoal = index + 1;
+        continue;
       }
-      continue;
-    }
-    clearance[index] = Math.min(
-      clearance[index],
-      awarded[index]
-        ? Math.max(0, goal.depth - Math.max(from[2], fish.position[2]))
-        : goal.kind === 'checkpoint'
-          ? checkpointClearance(from, fish.position, goal)
-          : Math.max(
-              0,
-              goal.depth - Math.max(from[2], fish.position[2]),
-              segmentDistance(from, fish.position, goal.position) -
-                (goal.radius - 0.15),
-            ),
-    );
-    const crossing =
-      from[2] < goal.position[2] && fish.position[2] >= goal.position[2];
-    if (!awarded[index]) {
-      const segment = movementSegment(from, fish.position);
-      let contact: number | null = null;
-      if (goal.kind === 'pearl') {
-        if (!outsidePickupBounds(from, fish.position, goal))
-          contact = pickupFraction(segment, goal.position, goal.radius);
-      } else if (crossing) {
-        const exact = checkpointFraction(segment, goal.definition);
-        if (exact) contact = scaleIntersection(exact, 1);
+      const eligible = index === 0 ? 0 : contacts[index - 1];
+      if (eligible === null || eligible > completed) break;
+      const goal = goals[index];
+      const fraction = Math.max(0, eligible - tick);
+      const from = between(previous, fish.position, fraction);
+      if (goal.kind === 'recovery') {
+        if (completed === timeline.observeAt) {
+          const remaining = distance(fish.position, goal.position);
+          clearance[index] = Math.max(0, remaining - (goal.radius - 0.15));
+          if (remaining <= goal.radius) contacts[index] = completed;
+        }
+        continue;
       }
-      if (contact !== null) {
-        awarded[index] = true;
-        awardAt[index] = tick + fraction + contact * (1 - fraction);
-      }
-    }
-    const missDepth =
-      goal.position[2] + (goal.kind === 'pearl' ? goal.radius : 0);
-    const passed = from[2] < missDepth && fish.position[2] >= missDepth;
-    if (passed && !awarded[index] && riskActive) {
-      const at = (missDepth - from[2]) / (fish.position[2] - from[2]);
-      const miss =
-        goal.kind === 'pearl'
-          ? clearance[index]
-          : Math.max(
-              0,
-              distance(between(from, fish.position, at), goal.position) -
-                (goal.radius - 0.15),
-            );
-      irreversibleMiss[index] = Math.max(
-        irreversibleMiss[index],
-        16 * (1 + miss) ** 2,
+      clearance[index] = Math.min(
+        clearance[index],
+        awarded[index]
+          ? Math.max(0, goal.depth - Math.max(from[2], fish.position[2]))
+          : goal.kind === 'checkpoint'
+            ? checkpointClearance(from, fish.position, goal)
+            : Math.max(
+                0,
+                goal.depth - Math.max(from[2], fish.position[2]),
+                segmentDistance(from, fish.position, goal.position) -
+                  (goal.radius - 0.15),
+              ),
       );
-    }
-    if (awarded[index]) {
-      if (goal.kind === 'checkpoint' && goal.terminal)
-        contacts[index] = awardAt[index];
-      else if (fish.position[2] >= goal.depth) {
-        const depthAt =
-          from[2] >= goal.depth
-            ? tick + fraction
-            : tick +
-              fraction +
-              ((1 - fraction) * (goal.depth - from[2])) /
-                (fish.position[2] - from[2]);
-        contacts[index] = Math.max(awardAt[index], depthAt);
+      const crossing =
+        from[2] < goal.position[2] && fish.position[2] >= goal.position[2];
+      if (!awarded[index]) {
+        const segment = movementSegment(from, fish.position);
+        let contact: number | null = null;
+        if (goal.kind === 'pearl') {
+          if (!outsidePickupBounds(from, fish.position, goal))
+            contact = pickupFraction(segment, goal.position, goal.radius);
+        } else if (crossing) {
+          const exact = checkpointFraction(segment, goal.definition);
+          if (exact) contact = scaleIntersection(exact, 1);
+        }
+        if (contact !== null) {
+          awarded[index] = true;
+          awardAt[index] = tick + fraction + contact * (1 - fraction);
+        }
+      }
+      const missDepth =
+        goal.position[2] + (goal.kind === 'pearl' ? goal.radius : 0);
+      const passed = from[2] < missDepth && fish.position[2] >= missDepth;
+      if (passed && !awarded[index] && completed <= interventionAt) {
+        const at = (missDepth - from[2]) / (fish.position[2] - from[2]);
+        const miss =
+          goal.kind === 'pearl'
+            ? clearance[index]
+            : Math.max(
+                0,
+                distance(between(from, fish.position, at), goal.position) -
+                  (goal.radius - 0.15),
+              );
+        irreversibleMiss[index] = Math.max(
+          irreversibleMiss[index],
+          16 * (1 + miss) ** 2,
+        );
+      }
+      if (awarded[index]) {
+        if (goal.kind === 'checkpoint' && goal.terminal)
+          contacts[index] = awardAt[index];
+        else if (fish.position[2] >= goal.depth) {
+          const depthAt =
+            from[2] >= goal.depth
+              ? tick + fraction
+              : tick +
+                fraction +
+                ((1 - fraction) * (goal.depth - from[2])) /
+                  (fish.position[2] - from[2]);
+          contacts[index] = Math.max(awardAt[index], depthAt);
+        }
       }
     }
   }
-}
-
-function finalizePulse(
-  state: PropagationState,
-  context: PropagationContext,
-  command: SunlitPulseCommand,
-  plan: PulsePlan,
-  motionSteps: number,
-  boundaryFish: FishState,
-  evaluationFish: FishState,
-) {
-  const { fish, awardAt, contacts, irreversibleMiss, clearance } = state;
-  const { goals, initiallyQualified, waypoint } = context;
-  const { observeAt, evaluationAt, interventionAt } = plan;
   function firstPending(
     sample: FishState,
     at: number,
@@ -901,10 +729,10 @@ function finalizePulse(
   }
   const boundaryGoalIndex = firstPending(
     boundaryFish,
-    observeAt,
+    timeline.observeAt,
     initiallyQualified,
   );
-  const boundaryAwards = awardAt.map((at) => at <= observeAt);
+  const boundaryAwards = awardAt.map((at) => at <= timeline.observeAt);
   const boundaryPotentialTerms =
     boundaryGoalIndex === -1
       ? Object.freeze({ distance: 0, heading: 0, velocity: 0 })
@@ -913,7 +741,7 @@ function finalizePulse(
           goals,
           boundaryGoalIndex,
           boundaryAwards,
-          waypoint,
+          observed.waypoint,
         );
   const boundaryPotential = Object.values(boundaryPotentialTerms).reduce(
     (sum, value) => sum + value,
@@ -932,7 +760,7 @@ function finalizePulse(
           goals,
           evaluationGoalIndex,
           awardAt.map((at) => at <= evaluationAt),
-          waypoint,
+          observed.waypoint,
         );
   const evaluationPotential = Object.values(evaluationPotentialTerms).reduce(
     (sum, value) => sum + value,
@@ -947,252 +775,37 @@ function finalizePulse(
   const score =
     evaluationPotential +
     0.003 * arrival +
-    (context.brakeHeld === command.brakeHeld ? 0 : 0.05) +
-    (context.slowing === Boolean(command.slowing) ? 0 : 0.05) +
-    (context.accelerating === Boolean(command.accelerating) ? 0 : 0.05);
+    (observed.brakeHeld === command.brakeHeld ? 0 : 0.05) +
+    (Boolean(observed.slowing) === Boolean(command.slowing) ? 0 : 0.05) +
+    (Boolean(observed.accelerating) === Boolean(command.accelerating)
+      ? 0
+      : 0.05);
   if (!Number.isFinite(score))
     throw new RangeError('Pulse prediction cost overflow.');
-  const terminal = copyFish(fish);
-  const boundary = boundaryFish === fish ? terminal : copyFish(boundaryFish);
-  const evaluation =
-    evaluationFish === fish
-      ? terminal
-      : evaluationFish === boundaryFish
-        ? boundary
-        : copyFish(evaluationFish);
   return Object.freeze({
     score,
     interventionAt,
-    boundaryFish: boundary,
-    fish: terminal,
+    boundaryFish,
+    fish,
     boundaryPotential,
     boundaryPotentialTerms,
     evaluationAt,
-    evaluationFish: evaluation,
+    evaluationFish,
     evaluationPotential,
     evaluationPotentialTerms,
     evaluationGoalIndex:
       evaluationGoalIndex === -1 ? goals.length : evaluationGoalIndex,
-    missPenalties: Object.freeze(irreversibleMiss.slice()),
-    minimumClearance: Object.freeze(clearance.slice()),
+    missPenalties: Object.freeze(irreversibleMiss),
+    minimumClearance: Object.freeze(clearance),
     boundaryGoalIndex:
       boundaryGoalIndex === -1 ? goals.length : boundaryGoalIndex,
     completedGoals: contacts.filter((at) => at !== null).length,
-    contacts: Object.freeze(contacts.slice()),
+    contacts: Object.freeze(contacts),
     motionSteps,
   });
 }
 
-export function compileSunlitPulseEvaluator(
-  timings: readonly SunlitPulseTiming[],
-): CompiledSunlitPulseEvaluator {
-  if (!Array.isArray(timings))
-    throw new TypeError('Pulse evaluator requires a timing array.');
-  if (timings.length < 1 || timings.length > 5)
-    throw new RangeError('Pulse evaluator requires one to five timings.');
-  const canonical = Array.from(timings, (timing: SunlitPulseTiming) => {
-    if (timing === null || typeof timing !== 'object' || Array.isArray(timing))
-      throw new TypeError('Pulse evaluator requires timing objects.');
-    const copy = Object.freeze({
-      onsetSteps: timing.onsetSteps,
-      holdSteps: timing.holdSteps,
-      observationSteps: timing.observationSteps,
-      skewSteps: timing.skewSteps,
-      releaseSkewSteps: timing.releaseSkewSteps,
-    });
-    const timeline = sunlitPulseTimeline(false, commands[0], copy);
-    const evaluationAt = pulseEvaluationAt(copy, timeline.observeAt);
-    return {
-      timing: copy,
-      evaluationAt,
-      interventionAt: Math.min(horizon, evaluationAt + 108),
-    };
-  });
-  const programs: PulseProgram[] = [];
-  for (let mask = 0; mask < 8; mask++) {
-    const paths: SunlitPulsePath[] = [];
-    for (const command of commands) {
-      for (const { timing, evaluationAt, interventionAt } of canonical) {
-        let brakeHeld = Boolean(mask & 4);
-        let slowing = Boolean(mask & 2);
-        let propelling = Boolean(mask & 1);
-        let steerX = 0;
-        let steerY = 0;
-        let cursor = 0;
-        const timeline = sunlitPulseTimeline(
-          brakeHeld,
-          command,
-          timing,
-          slowing,
-          propelling,
-        );
-        const symbols: number[] = [];
-        for (let tick = 0; tick < interventionAt; tick++) {
-          while (timeline.events[cursor]?.at === tick) {
-            const event = timeline.events[cursor++];
-            const down = event.type === 'keydown';
-            if (event.key === 'Shift') brakeHeld = down;
-            else if (event.key === 's') slowing = down;
-            else if (event.key === 'w') propelling = down;
-            else if (event.key === 'a' || event.key === 'd')
-              steerX = down ? (event.key === 'a' ? 1 : -1) : 0;
-            else steerY = down ? (event.key === 'ArrowUp' ? 1 : -1) : 0;
-          }
-          const throttle = Number(propelling) - Number(slowing);
-          const frame =
-            ((Number(brakeHeld) * 3 + throttle + 1) * 3 + steerX + 1) * 3 +
-            steerY +
-            1;
-          symbols.push(frame * 2 + Number(tick + 1 === timeline.observeAt));
-        }
-        paths.push({ symbols, observeAt: timeline.observeAt, evaluationAt });
-      }
-    }
-    programs.push(
-      Object.freeze({
-        topology: compileSunlitPulseTopology(paths),
-        plans: Object.freeze(
-          paths.map((path) =>
-            Object.freeze({
-              observeAt: path.observeAt,
-              evaluationAt: path.evaluationAt,
-              interventionAt: path.symbols.length,
-            }),
-          ),
-        ),
-      }),
-    );
-  }
-  return compiledEvaluator(
-    Object.freeze(programs),
-    canonical[0].timing,
-    canonical.length,
-  );
-}
-
-function compiledEvaluator(
-  programs: readonly PulseProgram[],
-  firstTiming: SunlitPulseTiming,
-  scenarioCount: number,
-): CompiledSunlitPulseEvaluator {
-  return Object.freeze({
-    bounds: Object.freeze(
-      programs.map((program, mask) =>
-        Object.freeze({ ...program.topology.work, mask }),
-      ),
-    ),
-    evaluate(observed: SunlitPulseObservation): SunlitPulseMatrix {
-      validatePrediction(observed, commands[0], firstTiming);
-      const mask =
-        Number(observed.brakeHeld) * 4 +
-        Number(observed.slowing ?? false) * 2 +
-        Number(observed.accelerating ?? false);
-      return evaluateProgram(programs[mask], observed, scenarioCount);
-    },
-  });
-}
-
-function readState(
-  arena: readonly (PropagationState | undefined)[],
-  slot: number,
-): PropagationState {
-  const state = arena[slot];
-  if (!state)
-    throw new Error('Pulse prefix state retired before its final reader.');
-  return state;
-}
-
-function evaluateProgram(
-  program: PulseProgram,
-  observed: SunlitPulseObservation,
-  scenarioCount: number,
-): SunlitPulseMatrix {
-  const { context, state: root } = createPropagation(observed);
-  const arena = new Array<PropagationState | undefined>(
-    program.topology.work.stateIndexSlots,
-  );
-  arena[0] = root;
-  let integrations = 0;
-  let expandedTicks = 0;
-  let propagationStateAllocations = 1;
-  let peakOwnedStates = 1;
-  let live = 1;
-  const candidates: Array<{
-    command: SunlitPulseCommand;
-    forecasts: SunlitPulseForecast[];
-  }> = commands.map((command) => ({
-    command,
-    forecasts: [],
-  }));
-  try {
-    const operations = program.topology.operations;
-    for (let index = 0; index < operations.length; index++) {
-      const operation = operations[index];
-      if (operation.kind === 'advance') {
-        let state = readState(arena, operation.parentSlot);
-        if (operation.takeParent) {
-          arena[operation.parentSlot] = undefined;
-          live--;
-        } else {
-          state = forkState(state);
-          propagationStateAllocations++;
-        }
-        arena[operation.nodeSlot] = state;
-        live++;
-        peakOwnedStates = Math.max(peakOwnedStates, live);
-        integrations++;
-        advanceOwned(
-          state,
-          context,
-          symbolFrames[operation.symbol],
-          operation.depth,
-          operation.symbol % 2 === 1,
-          true,
-        );
-      } else {
-        const candidate = candidates[Math.floor(operation.row / scenarioCount)];
-        const plan = program.plans[operation.row];
-        candidate.forecasts.push(
-          finalizePulse(
-            readState(arena, operation.leafSlot),
-            context,
-            candidate.command,
-            plan,
-            plan.interventionAt,
-            readState(arena, operation.boundarySlot).fish,
-            readState(arena, operation.evaluationSlot).fish,
-          ),
-        );
-        expandedTicks += plan.interventionAt;
-      }
-      for (const slot of operation.retireSlots) {
-        readState(arena, slot);
-        arena[slot] = undefined;
-        live--;
-      }
-    }
-    return Object.freeze({
-      candidates: Object.freeze(
-        candidates.map(({ command, forecasts }) =>
-          Object.freeze({ command, forecasts: Object.freeze(forecasts) }),
-        ),
-      ),
-      work: Object.freeze({
-        integrations,
-        expandedTicks,
-        propagationStateAllocations,
-        peakOwnedStates,
-        stateIndexSlots: arena.length,
-        finalLiveStates: live,
-      }),
-    });
-  } finally {
-    arena.fill(undefined);
-  }
-}
-
 let prepared = false;
-let policyEvaluator: CompiledSunlitPulseEvaluator | undefined;
 
 export function prepareSunlitPulsePolicy(): void {
   if (prepared) return;
@@ -1234,17 +847,31 @@ export function sunlitPulsePolicy(observed: SunlitPulseObservation) {
     costs: number[];
     worstMiss: number;
   }> = [];
-  policyEvaluator ??= compileSunlitPulseEvaluator(timings);
-  const matrix = policyEvaluator.evaluate(observed);
-  const motionSteps = matrix.work.expandedTicks;
-  for (const { command, forecasts: predictions } of matrix.candidates) {
-    candidates.push({
-      command,
-      costs: predictions.map((prediction) => prediction.score),
-      worstMiss: Math.max(
-        ...predictions.flatMap((prediction) => prediction.missPenalties),
-      ),
-    });
+  let motionSteps = 0;
+  for (const mode of [
+    { brakeHeld: false },
+    { brakeHeld: false, accelerating: true },
+    { brakeHeld: true },
+    { brakeHeld: false, slowing: true },
+    { brakeHeld: false, slowing: true, propel: true },
+  ]) {
+    for (const pulse of [null, 'a', 'd', 'ArrowUp', 'ArrowDown'] as const) {
+      const command = { ...mode, pulse };
+      const predictions = timings.map((timing) =>
+        predictPulse(observed, command, timing, false),
+      );
+      motionSteps += predictions.reduce(
+        (sum, prediction) => sum + prediction.motionSteps,
+        0,
+      );
+      candidates.push({
+        command,
+        costs: predictions.map((prediction) => prediction.score),
+        worstMiss: Math.max(
+          ...predictions.flatMap((prediction) => prediction.missPenalties),
+        ),
+      });
+    }
   }
   // Each timing has its own physical evaluation time. Compare lost opportunity
   // within that timing, not raw remaining distance across unequal clocks.
@@ -1278,3 +905,49 @@ export function sunlitPulsePolicy(observed: SunlitPulseObservation) {
   if (!best) throw new Error('Pulse prediction produced no command.');
   return Object.freeze({ ...best, stationaryCost, motionSteps });
 }
+// END FROZEN SCALAR SOURCE
+
+export const SUNLIT_PULSE_SCALAR_PROVENANCE = Object.freeze({
+  revision: 'a1f1157a1aae14d54dd4f3e215966e21e97d0620',
+  sourceBytes: 29701,
+  sourceSha256:
+    '985c791c1fec0c8db7e4f56830e2ce7f26a348289995e0dc4768ce31ebeecd3f',
+});
+
+export function referenceTruncated(
+  observed: SunlitPulseObservation,
+  command: SunlitPulseCommand,
+  timing: SunlitPulseTiming,
+) {
+  return predictPulse(observed, command, timing, false);
+}
+
+export const referenceCommands = Object.freeze([
+  { brakeHeld: false, pulse: null },
+  { brakeHeld: false, pulse: 'a' },
+  { brakeHeld: false, pulse: 'd' },
+  { brakeHeld: false, pulse: 'ArrowUp' },
+  { brakeHeld: false, pulse: 'ArrowDown' },
+  { brakeHeld: false, accelerating: true, pulse: null },
+  { brakeHeld: false, accelerating: true, pulse: 'a' },
+  { brakeHeld: false, accelerating: true, pulse: 'd' },
+  { brakeHeld: false, accelerating: true, pulse: 'ArrowUp' },
+  { brakeHeld: false, accelerating: true, pulse: 'ArrowDown' },
+  { brakeHeld: true, pulse: null },
+  { brakeHeld: true, pulse: 'a' },
+  { brakeHeld: true, pulse: 'd' },
+  { brakeHeld: true, pulse: 'ArrowUp' },
+  { brakeHeld: true, pulse: 'ArrowDown' },
+  { brakeHeld: false, slowing: true, pulse: null },
+  { brakeHeld: false, slowing: true, pulse: 'a' },
+  { brakeHeld: false, slowing: true, pulse: 'd' },
+  { brakeHeld: false, slowing: true, pulse: 'ArrowUp' },
+  { brakeHeld: false, slowing: true, pulse: 'ArrowDown' },
+  { brakeHeld: false, slowing: true, propel: true, pulse: null },
+  { brakeHeld: false, slowing: true, propel: true, pulse: 'a' },
+  { brakeHeld: false, slowing: true, propel: true, pulse: 'd' },
+  { brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowUp' },
+  { brakeHeld: false, slowing: true, propel: true, pulse: 'ArrowDown' },
+] satisfies SunlitPulseCommand[]);
+
+for (const command of referenceCommands) Object.freeze(command);

@@ -486,9 +486,9 @@ it('warms the pure planner once without native inputs or changing authored state
   const original = structuredClone(sunlit);
   try {
     control.prepareSunlitPulsePolicy();
-    expect(step).toHaveBeenCalledTimes(16_800);
+    expect(step).toHaveBeenCalledTimes(13_240);
     control.prepareSunlitPulsePolicy();
-    expect(step).toHaveBeenCalledTimes(16_800);
+    expect(step).toHaveBeenCalledTimes(13_240);
     expect(event).not.toHaveBeenCalled();
     expect(sunlit).toEqual(original);
   } finally {
