@@ -159,6 +159,41 @@ it('emits no invented native operation for an unchanged cruise', async () => {
   expect(press).not.toHaveBeenCalled();
 });
 
+it('reports planner wall cost on failure without adding a browser round trip', async () => {
+  const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+  plan({ brakeHeld: false, pulse: null });
+  const stop = new Error('Next observation failed');
+  const evaluate = vi
+    .fn<Page['evaluate']>()
+    .mockResolvedValueOnce(snapshot(observations[0]))
+    .mockRejectedValue(stop);
+  await expect(
+    driveSunlit(nativePage(evaluate, vi.fn(), vi.fn())),
+  ).rejects.toBe(stop);
+  const summary = log.mock.calls.find(
+    ([message]) =>
+      typeof message === 'string' &&
+      message.startsWith('Sunlit planner timing: '),
+  );
+  expect(summary).toBeDefined();
+  const timing: unknown = JSON.parse(
+    String(summary?.[0]).slice('Sunlit planner timing: '.length),
+  );
+  expect(timing).toMatchObject({ initialSteps: 1522, decisions: 1 });
+  if (
+    !timing ||
+    typeof timing !== 'object' ||
+    !('firstMs' in timing) ||
+    !('totalMs' in timing) ||
+    !('maxMs' in timing)
+  )
+    throw new Error('Incomplete planner timing summary.');
+  expect(timing.firstMs).toBeGreaterThanOrEqual(0);
+  expect(timing.totalMs).toBe(timing.firstMs);
+  expect(timing.maxMs).toBe(timing.firstMs);
+  expect(evaluate).toHaveBeenCalledTimes(2);
+});
+
 it('drains a pending pulse before handling a terminal observation and releasing its base', async () => {
   vi.spyOn(console, 'info').mockImplementation(() => {});
   const policy = plan({

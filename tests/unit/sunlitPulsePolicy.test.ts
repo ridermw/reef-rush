@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import sunlit from '../../src/content/courses/sunlitShoals';
 import { SCENE_FISH_TUNING } from '../../src/game/core/sceneRuntimeTuning';
 import { InputController } from '../../src/game/input/InputController';
+import { CurrentVolume } from '../../src/game/obstacles/CurrentVolume';
 import {
   stepFishMotion,
   type FishState,
@@ -22,6 +24,81 @@ function scenarios() {
 }
 
 const timing = { onsetSteps: 12, holdSteps: 8, observationSteps: 6 };
+
+it('does not revalidate a uniform authored current for every forecast step', () => {
+  const sample = vi.spyOn(CurrentVolume.prototype, 'sampleCurrent');
+  try {
+    policy()(observation());
+    expect(sample.mock.calls.length).toBeLessThanOrEqual(1);
+  } finally {
+    sample.mockRestore();
+  }
+});
+
+const warmCurrent = sunlit.objects.find((object) => object.type === 'current');
+if (!warmCurrent) throw new Error('Missing original Sunlit current.');
+const currentFaces = [0, 1, 2].flatMap((axis) =>
+  [-1, 1].flatMap((side) =>
+    [-1e-8, 0, 1e-8].map((offset) => ({ axis, side, offset })),
+  ),
+);
+
+it.each(currentFaces)(
+  'matches the authoritative current volume at face $axis/$side offset $offset',
+  ({ axis, side, offset }) => {
+    const volume = new CurrentVolume(warmCurrent);
+    try {
+      const start = observation();
+      start.fish.position = [...warmCurrent.position];
+      start.fish.position[axis] +=
+        side * warmCurrent.halfExtents[axis] + offset;
+      const expected = stepFishMotion(
+        start.fish,
+        {
+          throttle: 0,
+          steerX: 0,
+          steerY: 0,
+          brakeHeld: false,
+          dashPressed: false,
+          pausePressed: false,
+        },
+        SCENE_FISH_TUNING,
+        {
+          current: volume.sampleCurrent(start.fish.position),
+          waterSurfaceY: 0,
+        },
+        1 / 60,
+      ).next;
+      expect(
+        forecast()(
+          start,
+          { brakeHeld: false, pulse: null },
+          { onsetSteps: 0, holdSteps: 6, observationSteps: 1 },
+        ).boundaryFish,
+      ).toEqual(expected);
+    } finally {
+      volume.dispose();
+    }
+  },
+);
+
+it('warms the pure planner once without native inputs or changing authored state', async () => {
+  const motion = await import('../../src/game/player/stepFishMotion');
+  const step = vi.spyOn(motion, 'stepFishMotion');
+  const event = vi.spyOn(window, 'dispatchEvent');
+  const original = structuredClone(sunlit);
+  try {
+    control.prepareSunlitPulsePolicy();
+    expect(step).toHaveBeenCalledTimes(16_800);
+    control.prepareSunlitPulsePolicy();
+    expect(step).toHaveBeenCalledTimes(16_800);
+    expect(event).not.toHaveBeenCalled();
+    expect(sunlit).toEqual(original);
+  } finally {
+    step.mockRestore();
+    event.mockRestore();
+  }
+});
 
 it('does not trade a recoverable aligned approach for an irreversible delayed pearl miss', () => {
   const start = {

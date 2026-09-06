@@ -16,7 +16,10 @@ import {
   releaseNativeKeys,
   setNativeKeys,
 } from '../fixtures/nativeKeyboard';
-import { sunlitPulsePolicy } from '../fixtures/sunlitPulsePolicy';
+import {
+  prepareSunlitPulsePolicy,
+  sunlitPulsePolicy,
+} from '../fixtures/sunlitPulsePolicy';
 import type { NativeInputRecorder } from '../fixtures/nativeInputRecorder';
 import { recordNativeInput } from '../fixtures/nativeInputRecording';
 
@@ -77,19 +80,30 @@ export async function keyboardSurface(page: Page) {
   await expect(page.locator('#game-root canvas')).toBeFocused();
 }
 
-export async function selectSunlit(page: Page) {
+async function chooseSunlit(page: Page) {
   await page.getByRole('button', { name: 'Dive in' }).click();
   await expect(
     page.getByRole('heading', { name: 'Choose a course' }),
   ).toBeVisible();
+}
+
+export async function selectSunlit(page: Page) {
+  await chooseSunlit(page);
   await page.getByRole('button', { name: 'Load Sunlit Shoals' }).click();
 }
 
 export async function loadSunlit(page: Page) {
-  await selectSunlit(page);
+  prepareSunlitPulsePolicy();
+  await chooseSunlit(page);
+  // Park the pointer and focus the launch control before the race clock runs.
+  // Native Enter keeps the pointer parked; GameHost focuses its new canvas.
+  await page.getByRole('heading', { name: 'Choose a course' }).hover();
+  const launch = page.getByRole('button', { name: 'Load Sunlit Shoals' });
+  await launch.focus();
+  await launch.press('Enter');
   await screen(page, 'playing');
   await expect(page.locator('#game-root canvas')).toHaveCount(1);
-  await keyboardSurface(page);
+  await expect(page.locator('#game-root canvas')).toBeFocused();
 }
 
 export async function expectDraw(page: Page) {
@@ -174,6 +188,19 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
   let previousSteps: number | undefined;
   let failure: { error: unknown } | undefined;
   let state = await snapshot(page, recorder);
+  const planning: {
+    initialSteps: number;
+    decisions: number;
+    firstMs: number | null;
+    maxMs: number;
+    totalMs: number;
+  } = {
+    initialSteps: state.frame.steps,
+    decisions: 0,
+    firstMs: null,
+    maxMs: 0,
+    totalMs: 0,
+  };
   const deadline = Date.now() + 120_000;
   try {
     while (state.screen === 'playing' && Date.now() < deadline) {
@@ -223,6 +250,7 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
         );
         nextRecoveryLog = state.frame.steps + 120;
       }
+      const planningStart = performance.now();
       const decision = sunlitPulsePolicy({
         fish,
         steps: state.frame.steps,
@@ -235,6 +263,11 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
         slowing: held.has('s'),
         accelerating: held.has('w'),
       });
+      const planningMs = performance.now() - planningStart;
+      planning.firstMs ??= planningMs;
+      planning.decisions++;
+      planning.totalMs += planningMs;
+      planning.maxMs = Math.max(planning.maxMs, planningMs);
       previousSteps = state.frame.steps;
       const keys = new Set<string>([
         ...(decision.brakeHeld ? ['Shift'] : []),
@@ -280,6 +313,7 @@ async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
     failure = { error };
     throw error;
   } finally {
+    console.info(`Sunlit planner timing: ${JSON.stringify(planning)}`);
     await releaseNativeKeys(page.keyboard, held, failure);
   }
   if (state.race?.checkpointIndex !== checkpoints.at(-1))

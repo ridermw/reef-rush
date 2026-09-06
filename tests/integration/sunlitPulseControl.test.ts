@@ -9,6 +9,53 @@ import {
 } from '../fixtures/sunlitPulsePolicy';
 import * as simulation from '../fixtures/simulateSunlitPulses';
 
+// Run 34009109366 / a61bff2, before its first native key. These anchors
+// characterize late enrollment, not qualification of changed commands.
+it.each([
+  {
+    name: 'passing Kelpworks',
+    steps: 128,
+    position: [0, -4, 11.34973],
+    checkpoints: 0,
+  },
+  {
+    name: 'late Blacksmoker',
+    steps: 285,
+    position: [0.45, -4, 29.29945],
+    checkpoints: 1,
+  },
+  {
+    name: 'missed second checkpoint before Course Medals enrollment',
+    steps: 383,
+    position: [0.72, -4, 40.449388],
+    checkpoints: 1,
+  },
+])(
+  'reproduces fifth-run unsteered startup in original physics: $name',
+  async (sample) => {
+    const result = await simulation.simulateSunlitPulses({
+      initialSteps: sample.steps,
+      maxDecisions: 1,
+      timings: [{ onsetSteps: 0, holdSteps: 0, observationSteps: 1 }],
+      policy: () => ({ brakeHeld: false, pulse: null }),
+    });
+    const observed = result.decisions[0].observation;
+    expect(observed.steps).toBe(sample.steps);
+    expect(
+      Math.hypot(
+        ...observed.fish.position.map(
+          (value, axis) => value - sample.position[axis],
+        ),
+      ),
+    ).toBeLessThan(0.001);
+    expect(observed.checkpointIndex).toBe(sample.checkpoints);
+    expect(observed.collectedPearlIds).toEqual(
+      sample.checkpoints ? ['pearl-entry'] : [],
+    );
+    expect(result.remainingOwnedKeys).toEqual([]);
+  },
+);
+
 function run() {
   expect(simulation.simulateSunlitPulses).toBeTypeOf('function');
   return simulation.simulateSunlitPulses;

@@ -79,14 +79,32 @@ export type SunlitPulseGoal = GoalBase &
 
 const currents = sunlit.objects
   .filter((object) => object.type === 'current')
-  .map((definition) => new CurrentVolume(definition));
+  .map((definition) => {
+    const volume = new CurrentVolume(definition);
+    const { position, halfExtents } = volume.definition;
+    // These authored volumes are uniform AABBs. Retain the authoritative sample
+    // and inclusive faces instead of schema-parsing 17,000 forecast positions.
+    const velocity = Object.freeze(volume.sampleCurrent(position));
+    const minimum = position.map((value, axis) => value - halfExtents[axis]);
+    const maximum = position.map((value, axis) => value + halfExtents[axis]);
+    volume.dispose();
+    return Object.freeze({ velocity, minimum, maximum });
+  });
 const horizon = 240;
 
 function currentAt(position: Vector3): [number, number, number] {
   const result: [number, number, number] = [0, 0, 0];
   for (const volume of currents) {
-    const velocity = volume.sampleCurrent(position);
-    for (let axis = 0; axis < 3; axis++) result[axis] += velocity[axis];
+    if (
+      position[0] < volume.minimum[0] ||
+      position[0] > volume.maximum[0] ||
+      position[1] < volume.minimum[1] ||
+      position[1] > volume.maximum[1] ||
+      position[2] < volume.minimum[2] ||
+      position[2] > volume.maximum[2]
+    )
+      continue;
+    for (let axis = 0; axis < 3; axis++) result[axis] += volume.velocity[axis];
   }
   return result;
 }
@@ -730,6 +748,32 @@ function predictPulse(
     contacts: Object.freeze(contacts),
     motionSteps,
   });
+}
+
+let prepared = false;
+
+export function prepareSunlitPulsePolicy(): void {
+  if (prepared) return;
+  // Exercise the pure planner before native course activation, not while the
+  // unobserved race advances. This synthetic state never reaches the game.
+  sunlitPulsePolicy({
+    fish: {
+      position: sunlit.spawn.position,
+      velocity: [0, 0, 0],
+      yaw: sunlit.spawn.yaw,
+      pitch: 0,
+      roll: 0,
+      dashEnergy: 1,
+      isSubmerged: true,
+    },
+    steps: 0,
+    waypoint: 0,
+    approachingCheckpoint: false,
+    brakeHeld: false,
+    checkpointIndex: 0,
+    collectedPearlIds: [],
+  });
+  prepared = true;
 }
 
 export function sunlitPulsePolicy(observed: SunlitPulseObservation) {
