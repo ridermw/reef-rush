@@ -41,7 +41,7 @@ test('earned Sunlit then three consecutive native Kelpworks medals save all actu
   await dialog.getByRole('checkbox', { name: 'Reduced effects' }).check();
   await dialog.getByRole('button', { name: 'Close settings' }).click();
   await loadSunlit(page);
-  const sunlitResult = await driveSunlit(page);
+  const sunlitResult = await driveSunlit(page, testInfo);
   expect(sunlitResult.medal).not.toBeNull();
   let progress = updateProgress(emptyProgress(), sunlitResult);
   await expect.poll(() => savedProgress(page)).toEqual(progress);

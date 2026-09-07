@@ -25,16 +25,31 @@ test('real keyboard Sunlit finish and queued native save merge newer version 1 r
       const hook = window.__REEF_RUSH_TEST__;
       const a = hook?.getSnapshot();
       const b = hook?.getSnapshot();
+      const stamp = hook?.getInputStamp();
       return {
         keys: Object.keys(hook ?? {}),
+        stampKeys: Object.keys(stamp ?? {}),
         frozen:
           Object.isFrozen(hook) &&
           Object.isFrozen(a) &&
-          Object.isFrozen(a?.frame),
+          Object.isFrozen(a?.frame) &&
+          Object.isFrozen(stamp),
         copies: a !== b && a?.frame !== b?.frame,
       };
     }),
-  ).toEqual({ keys: ['getSnapshot'], frozen: true, copies: true });
+  ).toEqual({
+    keys: ['getSnapshot', 'getInputStamp'],
+    stampKeys: [
+      'screen',
+      'steps',
+      'rendered',
+      'settingsOpen',
+      'graphicsLost',
+      'inputResets',
+    ],
+    frozen: true,
+    copies: true,
+  });
   // A second real same-origin page owns the native lock, not a gameplay hook.
   const lockOwner = await context.newPage();
   await lockOwner.goto('./');

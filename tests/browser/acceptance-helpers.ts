@@ -1,4 +1,9 @@
-import { expect, type Page } from '@playwright/test';
+import {
+  expect,
+  type JSHandle,
+  type Page,
+  type TestInfo,
+} from '@playwright/test';
 import sunlit from '../../src/content/courses/sunlitShoals';
 import type { HostSnapshot } from '../../src/game/core/GameHost';
 import {
@@ -6,15 +11,31 @@ import {
   sunlitSteeringTarget,
   sunlitWaypoints,
 } from '../fixtures/sunlitWaypointPolicy';
+import {
+  pulseNativeKeys,
+  releaseNativeKeys,
+  setNativeKeys,
+} from '../fixtures/nativeKeyboard';
+import {
+  prepareSunlitPulsePolicy,
+  sunlitPulsePolicy,
+} from '../fixtures/sunlitPulsePolicy';
+import type { NativeInputRecorder } from '../fixtures/nativeInputRecorder';
+import { recordNativeInput } from '../fixtures/nativeInputRecording';
 
 export const progressKey = 'reef-rush.progress';
 
-export async function snapshot(page: Page): Promise<HostSnapshot> {
-  return page.evaluate(() => {
+export async function snapshot(
+  page: Page,
+  recorder?: JSHandle<NativeInputRecorder>,
+): Promise<HostSnapshot> {
+  return page.evaluate((recording) => {
     const hook = window.__REEF_RUSH_TEST__;
     if (!hook) throw new Error('Read-only acceptance diagnostics are missing.');
-    return hook.getSnapshot();
-  });
+    const state = hook.getSnapshot();
+    recording?.observe(state);
+    return state;
+  }, recorder);
 }
 
 export async function screen(page: Page, value: HostSnapshot['screen']) {
@@ -59,19 +80,30 @@ export async function keyboardSurface(page: Page) {
   await expect(page.locator('#game-root canvas')).toBeFocused();
 }
 
-export async function selectSunlit(page: Page) {
+async function chooseSunlit(page: Page) {
   await page.getByRole('button', { name: 'Dive in' }).click();
   await expect(
     page.getByRole('heading', { name: 'Choose a course' }),
   ).toBeVisible();
+}
+
+export async function selectSunlit(page: Page) {
+  await chooseSunlit(page);
   await page.getByRole('button', { name: 'Load Sunlit Shoals' }).click();
 }
 
 export async function loadSunlit(page: Page) {
-  await selectSunlit(page);
+  prepareSunlitPulsePolicy();
+  await chooseSunlit(page);
+  // Park the pointer and focus the launch control before the race clock runs.
+  // Native Enter keeps the pointer parked; GameHost focuses its new canvas.
+  await page.getByRole('heading', { name: 'Choose a course' }).hover();
+  const launch = page.getByRole('button', { name: 'Load Sunlit Shoals' });
+  await launch.focus();
+  await launch.press('Enter');
   await screen(page, 'playing');
   await expect(page.locator('#game-root canvas')).toHaveCount(1);
-  await keyboardSurface(page);
+  await expect(page.locator('#game-root canvas')).toBeFocused();
 }
 
 export async function expectDraw(page: Page) {
@@ -132,7 +164,18 @@ export async function expectIdle(page: Page) {
 
 // Authored CP/pearl route from the real SceneRuntime and GameHost traversals.
 // All control goes through Playwright's native keyboard; snapshots are read-only.
-export async function driveSunlit(page: Page) {
+export async function driveSunlit(
+  page: Page,
+  recording?: Pick<TestInfo, 'attach'>,
+) {
+  return recording
+    ? recordNativeInput(page, recording, (recorder) =>
+        runSunlit(page, recorder),
+      )
+    : runSunlit(page);
+}
+
+async function runSunlit(page: Page, recorder?: JSHandle<NativeInputRecorder>) {
   const held = new Set<string>();
   const checkpoints: number[] = [];
   const pearls: number[] = [];
@@ -142,7 +185,22 @@ export async function driveSunlit(page: Page) {
   let waypoint = 0;
   let approachingCheckpoint = false;
   let nextRecoveryLog = 0;
-  let state = await snapshot(page);
+  let previousSteps: number | undefined;
+  let failure: { error: unknown } | undefined;
+  let state = await snapshot(page, recorder);
+  const planning: {
+    initialSteps: number;
+    decisions: number;
+    firstMs: number | null;
+    maxMs: number;
+    totalMs: number;
+  } = {
+    initialSteps: state.frame.steps,
+    decisions: 0,
+    firstMs: null,
+    maxMs: 0,
+    totalMs: 0,
+  };
   const deadline = Date.now() + 120_000;
   try {
     while (state.screen === 'playing' && Date.now() < deadline) {
@@ -192,42 +250,44 @@ export async function driveSunlit(page: Page) {
         );
         nextRecoveryLog = state.frame.steps + 120;
       }
-      const [x, y, z] = steering.target;
-      const dx = x - fish.position[0];
-      const dy = y - fish.position[1];
-      const dz = z - fish.position[2];
-      const yawError = Math.atan2(
-        Math.sin(Math.atan2(dx, dz) - fish.yaw),
-        Math.cos(Math.atan2(dx, dz) - fish.yaw),
-      );
-      const pitch = Math.atan2(dy, Math.max(1, Math.hypot(dx, dz)));
-      const keys = new Set<string>();
-      if (Math.abs(yawError) > 0.025) keys.add(yawError > 0 ? 'a' : 'd');
-      if (Math.abs(pitch - fish.pitch) > 0.06)
-        keys.add(pitch > fish.pitch ? 'ArrowUp' : 'ArrowDown');
-      const speed = Math.hypot(...fish.velocity);
-      if (speed > 4) keys.add('s');
-      else if (speed < 3) keys.add('w');
-      if (Math.abs(yawError) > 0.6) keys.add('Shift');
-      for (const key of held) {
-        if (!keys.has(key)) {
-          await page.keyboard.up(key);
-          held.delete(key);
-        }
-      }
-      for (const key of keys) {
-        if (!held.has(key)) {
-          await page.keyboard.down(key);
-          held.add(key);
-        }
-      }
+      const planningStart = performance.now();
+      const decision = sunlitPulsePolicy({
+        fish,
+        steps: state.frame.steps,
+        previousSteps,
+        waypoint,
+        approachingCheckpoint,
+        checkpointIndex: race.checkpointIndex,
+        collectedPearlIds: state.collectedPearlIds,
+        brakeHeld: held.has('Shift'),
+        slowing: held.has('s'),
+        accelerating: held.has('w'),
+      });
+      const planningMs = performance.now() - planningStart;
+      planning.firstMs ??= planningMs;
+      planning.decisions++;
+      planning.totalMs += planningMs;
+      planning.maxMs = Math.max(planning.maxMs, planningMs);
+      previousSteps = state.frame.steps;
+      const keys = new Set<string>([
+        ...(decision.brakeHeld ? ['Shift'] : []),
+        ...(decision.slowing ? ['s'] : []),
+        ...(decision.accelerating ? ['w'] : []),
+      ]);
+      await setNativeKeys(page.keyboard, held, keys);
+      const pulse = [
+        ...(decision.propel ? ['w'] : []),
+        ...(decision.pulse === null ? [] : [decision.pulse]),
+      ];
+      if (pulse.length) await pulseNativeKeys(page.keyboard, held, pulse);
       const observed = await page.evaluate(
-        (previous) =>
+        ({ previous, recorder }) =>
           new Promise<{ state: HostSnapshot; hud: (string | null)[] }>(
             (resolve) => {
               const observe = () => {
                 const next = window.__REEF_RUSH_TEST__!.getSnapshot();
                 if (next.screen !== 'playing' || next.frame.steps > previous) {
+                  recorder?.observe(next);
                   resolve({
                     state: next,
                     hud: [...document.querySelectorAll('.hud-card strong')].map(
@@ -239,7 +299,7 @@ export async function driveSunlit(page: Page) {
               requestAnimationFrame(observe);
             },
           ),
-        state.frame.steps,
+        { previous: state.frame.steps, recorder },
       );
       state = observed.state;
       if (state.race) {
@@ -249,8 +309,12 @@ export async function driveSunlit(page: Page) {
           hudPearls.add(state.race.pearlCount);
       }
     }
+  } catch (error) {
+    failure = { error };
+    throw error;
   } finally {
-    for (const key of held) await page.keyboard.up(key);
+    console.info(`Sunlit planner timing: ${JSON.stringify(planning)}`);
+    await releaseNativeKeys(page.keyboard, held, failure);
   }
   if (state.race?.checkpointIndex !== checkpoints.at(-1))
     checkpoints.push(state.race?.checkpointIndex ?? -1);

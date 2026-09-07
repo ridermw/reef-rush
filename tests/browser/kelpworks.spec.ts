@@ -150,7 +150,7 @@ test('actual Sunlit earns lazy Kelpworks, native five-pearl finishes, replay and
   await loadSunlit(page);
   expect((await snapshot(page)).preferences).toEqual(preferences);
   await expectHealthyAudio();
-  const sunlitResult = await driveSunlit(page);
+  const sunlitResult = await driveSunlit(page, testInfo);
   expect(sunlitResult.medal).not.toBeNull();
   let progress = updateProgress(emptyProgress(), sunlitResult);
   await expect.poll(() => stored(page, progressKey)).toEqual(progress);

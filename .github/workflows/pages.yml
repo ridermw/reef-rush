@@ -1,0 +1,146 @@
+name: POC Pages publication
+
+on:
+  push:
+    paths-ignore:
+      - docs/handoffs/2026-09-04-reef-rush.md
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reef-rush-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select the pinned Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Check bootstrap and release contracts
+        run: npm run test:bootstrap && npm run test:release
+      - name: Restore public locked dependencies
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
+        run: npm ci --no-audit --no-fund
+      - name: Run focused release tests
+        run: npm run test -- tests/unit/livePublication.test.ts tests/unit/playwrightLiveConfig.test.ts tests/unit/playwrightConfig.test.ts
+      - name: Check types
+        run: npm run typecheck
+      - name: Validate original assets
+        run: npm run assets:validate
+      - name: Install pinned Chromium and WebKit browsers
+        run: npm exec -- playwright install chromium webkit
+      - name: Run production scenarios
+        timeout-minutes: 8
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-build-${{ github.run_id }}-${{ github.run_attempt }}
+        run: npm run test:browser -- --project=production --project=mobile
+      - name: Identify the tested normal bundle
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-build-${{ github.run_id }}-${{ github.run_attempt }}
+          REEF_RUSH_SOURCE_COMMIT: ${{ github.sha }}
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:REEF_RUSH_BROWSER_ARTIFACTS 'production-dist'
+          $files = @(Get-ChildItem -Path $dist -Recurse -File -Filter '*.js' -ErrorAction Stop)
+          if ($files.Count -eq 0) { throw 'No emitted JavaScript found.' }
+          $matches = @($files | Select-String -SimpleMatch '__REEF_RUSH_TEST__' -List)
+          if ($matches.Count -gt 0) { throw 'Acceptance hooks found in normal production output.' }
+          node tools\write-build-info.mjs $env:REEF_RUSH_SOURCE_COMMIT $dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload the tested Pages artifact
+        if: github.repository == 'ridermw/reef-rush' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-build-${{ github.run_id }}-${{ github.run_attempt }}
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\production-dist
+      - name: Retain browser evidence
+        if: always()
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-build-${{ github.run_id }}-${{ github.run_attempt }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: poc-production-evidence
+          path: |
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results.json
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\report
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: github.repository == 'ridermw/reef-rush' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the tested Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  live:
+    needs: deploy
+    if: github.repository == 'ridermw/reef-rush' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the published workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Select the pinned Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Restore public locked dependencies
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_CACHE: ${{ runner.temp }}\reef-rush-npm-cache
+        run: npm ci --no-audit --no-fund
+      - name: Install pinned Chromium and WebKit browsers
+        run: npm exec -- playwright install chromium webkit
+      - name: Verify the canonical publication
+        timeout-minutes: 13
+        env:
+          REEF_RUSH_EXPECTED_COMMIT: ${{ github.sha }}
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-live-${{ github.run_id }}-${{ github.run_attempt }}
+        run: npm run test:browser -- --config=playwright.live.config.ts
+      - name: Retain browser evidence
+        if: always()
+        env:
+          REEF_RUSH_BROWSER_ARTIFACTS: ${{ runner.temp }}\reef-rush-poc-live-${{ github.run_id }}-${{ github.run_attempt }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: poc-live-evidence
+          path: |
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\results.json
+            ${{ env.REEF_RUSH_BROWSER_ARTIFACTS }}\report
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7

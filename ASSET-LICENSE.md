@@ -113,7 +113,7 @@ npm run assets:generate
 npm run assets:generate -- --blender "<Blender executable>" --output-root "<output assets directory>"
 npm run assets:validate
 npm run assets:validate -- --asset-root "<output assets directory>"
-npm run test -- tests/assets/assetPipeline.test.ts
+npm run test -- tests\assets\assetPipeline.test.ts
 ```
 
 The executable defaults to `blender`, or the optional `BLENDER` environment
@@ -124,9 +124,10 @@ It generates all eight files. The original four exports retain their original
 Blender call order; Kelpworks materials and mesh datablocks are created only
 after those exports, preserving the reviewed Sunlit/fish/prop bytes.
 Blacksmoker materials and mesh datablocks are created only after all six
-previous outputs. Generate into a separate output directory and compare the
-six existing files byte-for-byte before copying only the new Blacksmoker pair;
-do not overwrite previous artwork or update its reviewed hash baselines.
+previous outputs. Generate into a separate output directory and compare all
+eight generated files with the corresponding files under `public/assets/`.
+Do not overwrite repository artwork or update reviewed hash baselines merely
+to accept different output. A deliberate artwork revision needs its own review.
 No UI, network, decoder or image resource is required. Tool installations and
 absolute machine paths do not belong in the repository.
 Unit tests and normal validation load the repository GLBs and do not require
