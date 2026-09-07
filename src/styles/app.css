@@ -210,6 +210,14 @@ dd {
   background: linear-gradient(180deg, var(--color-ocean), var(--color-ink));
 }
 
+.game-root canvas {
+  touch-action: none;
+}
+
+.touch-controls {
+  display: none;
+}
+
 .runtime-overlay {
   pointer-events: none;
   position: relative;
@@ -792,6 +800,231 @@ dd {
 
   .hud-header {
     flex-direction: column;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .app-shell {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .app-shell--runtime {
+    min-height: 100svh;
+    min-height: 100dvh;
+    padding: 0;
+  }
+
+  .runtime-stage {
+    width: 100%;
+    height: 100svh;
+    height: 100dvh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .runtime-overlay {
+    height: 100%;
+    min-height: 0;
+    padding: max(0.5rem, env(safe-area-inset-top))
+      max(0.5rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom))
+      max(0.5rem, env(safe-area-inset-left));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  [data-screen='playing'] .runtime-overlay {
+    overflow: hidden;
+  }
+
+  [data-screen='paused'] .hud-shell {
+    display: none;
+  }
+
+  [data-screen='paused'] .runtime-overlay {
+    align-content: start;
+    gap: 0.5rem;
+  }
+
+  .hud-shell {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .hud-header {
+    flex-direction: row;
+  }
+
+  .hud-header .eyebrow {
+    display: none;
+  }
+
+  .hud-header button {
+    flex-shrink: 0;
+  }
+
+  .hud-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+
+  .hud-card {
+    padding: 0.2rem 0.35rem;
+    gap: 0.1rem;
+    flex-wrap: wrap;
+    font-size: 0.7rem;
+  }
+
+  .hud-card strong {
+    font-size: 0.85rem;
+  }
+
+  .touch-controls {
+    position: absolute;
+    z-index: 2;
+    inset: auto max(0.75rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom))
+      max(0.75rem, env(safe-area-inset-left));
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 0.75rem;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .touch-controls button {
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .touch-controls button:focus-visible {
+    outline: 3px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+
+  .touch-steering {
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .touch-steering p {
+    font-size: 0.65rem;
+    color: var(--color-foam);
+    text-shadow: 0 1px 3px var(--color-ink);
+    margin-top: 0.2rem;
+  }
+
+  .touch-pad {
+    position: relative;
+    display: block;
+    width: 124px;
+    height: 124px;
+    padding: 0;
+    border: 2px solid var(--color-reef);
+    border-radius: 50%;
+    background: #102e30cc;
+    color: var(--color-foam);
+  }
+
+  .touch-pad__cross {
+    position: absolute;
+    inset: 16%;
+    background:
+      linear-gradient(var(--color-line), var(--color-line)) center / 1px 100%
+        no-repeat,
+      linear-gradient(var(--color-line), var(--color-line)) center / 100% 1px
+        no-repeat;
+  }
+
+  .touch-pad__thumb {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    top: calc(50% - 22px);
+    left: calc(50% - 22px);
+    border-radius: 50%;
+    border: 1px solid var(--color-foam);
+    background: #9ed6bb80;
+    pointer-events: none;
+  }
+
+  .touch-pad__label {
+    position: absolute;
+    bottom: 7px;
+    left: 0;
+    right: 0;
+    font-size: 0.7rem;
+    pointer-events: none;
+  }
+
+  .touch-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+    width: min(44vw, 11rem);
+    padding-bottom: 1.1rem;
+  }
+
+  .touch-actions button {
+    padding: 0.45rem;
+    font-size: 0.85rem;
+    transform: none;
+  }
+
+  .touch-actions button[aria-pressed='true'] {
+    border-color: var(--color-gold);
+    color: var(--color-gold);
+  }
+
+  .touch-dash,
+  .touch-brake {
+    grid-column: 1 / -1;
+  }
+
+  .course-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  }
+
+  .primary-button,
+  .secondary-button,
+  .text-button,
+  .toggle-setting,
+  .range-setting {
+    min-height: 44px;
+  }
+
+  .settings-dialog {
+    max-height: calc(
+      100dvh - max(1rem, env(safe-area-inset-top)) -
+        max(1rem, env(safe-area-inset-bottom))
+    );
+    padding: 1rem;
+  }
+}
+
+@media (any-pointer: coarse) and (orientation: landscape) {
+  .hud-shell {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .hud-feedback {
+    display: none;
+  }
+
+  .touch-pad {
+    width: 112px;
+    height: 112px;
   }
 }
 

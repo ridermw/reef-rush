@@ -23,6 +23,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { SavedProgressDialog } from './components/SavedProgressDialog';
 import { DiagnosticsDialog } from './components/DiagnosticsDialog';
 import { AudioNotice, type ShellAudio } from './components/AudioNotice';
+import { TouchControls } from './components/TouchControls';
 
 export interface AppProps {
   store: AppStore;
@@ -38,6 +39,7 @@ export interface AppProps {
     | 'retrySaving'
     | 'getDiagnostics'
   > &
+    Partial<Pick<GameHost, 'touchInput'>> &
     ShellAudio;
 }
 
@@ -253,6 +255,7 @@ export function App({ store, host, settings }: AppProps) {
     return (
       <div
         className="app-shell app-shell--runtime"
+        data-screen={state.screen}
         data-reduced-effects={preferencesState.settings.reducedMotion}
       >
         <div className="runtime-stage">
@@ -279,6 +282,9 @@ export function App({ store, host, settings }: AppProps) {
             </div>
             {notices}
           </div>
+          {state.screen === 'playing' && !modal && host?.touchInput && (
+            <TouchControls input={host.touchInput} />
+          )}
           {modalContent}
         </div>
       </div>

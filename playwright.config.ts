@@ -18,6 +18,7 @@ const isCI = Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: join('tests', 'browser'),
+  testIgnore: '**/live-deployment.spec.ts',
   outputDir: join(outputRoot, 'results'),
   fullyParallel: false,
   forbidOnly: isCI,
@@ -42,11 +43,27 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'acceptance', testIgnore: '**/production.spec.ts' },
+    {
+      name: 'acceptance',
+      testIgnore: [
+        '**/production.spec.ts',
+        '**/mobile.spec.ts',
+        '**/live-deployment.spec.ts',
+      ],
+    },
     {
       name: 'production',
       testMatch: '**/production.spec.ts',
       use: { baseURL: productionURL },
+    },
+    {
+      name: 'mobile',
+      testMatch: '**/mobile.spec.ts',
+      use: {
+        ...devices['iPhone 13'],
+        browserName: 'webkit',
+        baseURL: productionURL,
+      },
     },
   ],
   webServer: [

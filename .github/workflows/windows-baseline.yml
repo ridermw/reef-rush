@@ -44,9 +44,9 @@ jobs:
       - name: Run the required baseline
         timeout-minutes: 3
         run: npm run validate
-      - name: Install the pinned Chromium browser
+      - name: Install pinned Chromium and WebKit browsers
         timeout-minutes: 2
-        run: npm exec -- playwright install chromium
+        run: npm exec -- playwright install chromium webkit
       - name: Run the complete browser suite
         timeout-minutes: 29
         # runner.temp is unavailable in job env; collection repeats this root.

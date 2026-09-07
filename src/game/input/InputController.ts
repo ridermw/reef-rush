@@ -141,7 +141,12 @@ export class InputController {
   };
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
-    if (!this.isPlaying() || !this.preferences.mouseSteering) return;
+    if (
+      event.pointerType === 'touch' ||
+      !this.isPlaying() ||
+      !this.preferences.mouseSteering
+    )
+      return;
     if (
       this.options.pointerSurface &&
       (!(event.target instanceof Node) ||

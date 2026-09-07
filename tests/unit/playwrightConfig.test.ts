@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { PlaywrightTestConfig } from '@playwright/test';
+import { devices, type PlaywrightTestConfig } from '@playwright/test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rootVariable = 'REEF_RUSH_BROWSER_ARTIFACTS';
@@ -150,7 +150,7 @@ describe('browser CI configuration', () => {
   });
 
   it.each([undefined, 'true'])(
-    'preserves both projects and all browser execution constraints (CI=%j)',
+    'preserves acceptance, desktop and iPhone projects with shared normal output (CI=%j)',
     async (ci) => {
       vi.stubEnv('CI', ci);
       const config = await loadConfig();
@@ -174,13 +174,38 @@ describe('browser CI configuration', () => {
       });
       expect(config.use?.launchOptions).toBeUndefined();
       expect(config.projects).toEqual([
-        { name: 'acceptance', testIgnore: '**/production.spec.ts' },
+        {
+          name: 'acceptance',
+          testIgnore: [
+            '**/production.spec.ts',
+            '**/mobile.spec.ts',
+            '**/live-deployment.spec.ts',
+          ],
+        },
         {
           name: 'production',
           testMatch: '**/production.spec.ts',
           use: { baseURL: 'http://127.0.0.1:4174/reef-rush/' },
         },
+        {
+          name: 'mobile',
+          testMatch: '**/mobile.spec.ts',
+          use: {
+            ...devices['iPhone 13'],
+            browserName: 'webkit',
+            baseURL: 'http://127.0.0.1:4174/reef-rush/',
+          },
+        },
       ]);
+      expect(
+        config.projects?.find(({ name }) => name === 'mobile')?.use,
+      ).toMatchObject({
+        browserName: 'webkit',
+        viewport: { width: 390, height: 664 },
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 3,
+      });
       expect(config.webServer).toEqual([
         {
           command:

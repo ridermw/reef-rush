@@ -37,6 +37,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('does not treat touch pointer movement as desktop mouse steering', () => {
+  const controller = withPreferences();
+  const event = new PointerEvent('pointermove', {
+    pointerType: 'touch',
+    bubbles: true,
+  });
+  Object.defineProperties(event, {
+    movementX: { value: 100 },
+    movementY: { value: -100 },
+  });
+  window.dispatchEvent(event);
+  expect(controller.readFrame()).toMatchObject({ steerX: 0, steerY: 0 });
+});
+
 it('reads keyboard axes, one-shot actions, and clears consumed presses', () => {
   const controller = new InputController();
 

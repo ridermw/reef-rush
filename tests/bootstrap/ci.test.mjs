@@ -99,7 +99,7 @@ test('npm content cache export remains manual-only with two-day retention', () =
   assert.match(cache, /retention-days: 2/);
 });
 
-test('validation, installed-package Chromium, all browser projects and normal restoration stay ordered', () => {
+test('validation, pinned browsers, all browser projects and normal restoration stay ordered', () => {
   assert.deepEqual(
     steps.map((value) => value.split('\n')[0]),
     [
@@ -108,7 +108,7 @@ test('validation, installed-package Chromium, all browser projects and normal re
       'Restore public locked dependencies',
       'Export only the npm content cache',
       'Run the required baseline',
-      'Install the pinned Chromium browser',
+      'Install pinned Chromium and WebKit browsers',
       'Run the complete browser suite',
       'Restore and check normal production output',
       'Retain browser evidence',
@@ -116,8 +116,8 @@ test('validation, installed-package Chromium, all browser projects and normal re
   );
   assert.match(step('Run the required baseline'), /run: npm run validate\n/);
   assert.match(
-    step('Install the pinned Chromium browser'),
-    /run: npm exec -- playwright install chromium\n/,
+    step('Install pinned Chromium and WebKit browsers'),
+    /run: npm exec -- playwright install chromium webkit\n/,
   );
   assert.match(
     step('Run the complete browser suite'),

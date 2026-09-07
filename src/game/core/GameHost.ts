@@ -5,6 +5,7 @@ import type { AppScreen } from '../../app/screens';
 import type { CourseId } from '../../content/courses/courseIds';
 import type { CourseDefinition } from '../course/courseDefinition';
 import { InputController, isPauseKeyEvent } from '../input/InputController';
+import { TouchInput } from '../input/TouchInput';
 import {
   emptyProgress,
   mergeProgress,
@@ -188,6 +189,14 @@ async function coordinateProgress(
 /** One long-lived owner per app store, independent of React's screen/remount lifetime. */
 export class GameHost {
   readonly settings: SettingsStore;
+  readonly touchInput = new TouchInput(
+    () =>
+      !this.disposed &&
+      this.container !== null &&
+      !this.settingsOpen &&
+      !this.graphicsLost &&
+      this.store.getState().screen === 'playing',
+  );
   private readonly audio: AudioEngine;
   private readonly unsubscribeSettings: () => void;
   private readonly motionQuery: MediaQueryList | null;
@@ -299,6 +308,7 @@ export class GameHost {
   readonly setSettingsOpen = (open: boolean): void => {
     this.settingsOpen = open;
     this.input?.clear();
+    this.touchInput.clear();
     if (import.meta.env.VITE_TEST_HOOKS === 'true') this.inputResets++;
   };
 
@@ -975,6 +985,7 @@ export class GameHost {
     this.runner.reset();
     this.lastTime = this.now();
     this.input?.clear();
+    this.touchInput.clear();
     if (import.meta.env.VITE_TEST_HOOKS === 'true') this.inputResets++;
   }
 
@@ -1020,7 +1031,10 @@ export class GameHost {
         const result = this.runner.advance(dt, (stepSeconds) => {
           if (!this.input)
             throw new Error('Playing runtime has no input owner.');
-          const step = scene.step(this.input.readFrame(), stepSeconds);
+          const step = scene.step(
+            this.touchInput.combine(this.input.readFrame()),
+            stepSeconds,
+          );
           this.steps += 1;
           for (const cue of this.feedback.consume(
             step.fishEvents,
@@ -1194,6 +1208,7 @@ export class GameHost {
   }
 
   private releaseSurface(): void {
+    this.touchInput.clear();
     this.input = null;
     const errors = releaseResources(this.surfaceReleases);
     this.pendingReleases.push(...this.surfaceReleases.splice(0));
@@ -1202,6 +1217,7 @@ export class GameHost {
   }
 
   private cleanupCurrent(): void {
+    this.touchInput.clear();
     const errors: unknown[] = [];
     try {
       this.stopFrame();
